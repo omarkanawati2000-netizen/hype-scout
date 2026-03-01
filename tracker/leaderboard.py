@@ -119,14 +119,15 @@ def main():
 
         peak_mc = max(current_mc, entry_mc * peak_mult)
         leaderboard.append({
-            "mint":       mint,
-            "name":       c.get("name", "?"),
-            "symbol":     c.get("symbol", "?"),
-            "entry_mc":   entry_mc,
-            "current_mc": current_mc,
-            "peak_mc":    peak_mc,
-            "peak_mult":  peak_mult,
-            "age_str":    c.get("added_at", "")[:10],
+            "mint":           mint,
+            "name":           c.get("name", "?"),
+            "symbol":         c.get("symbol", "?"),
+            "entry_mc":       entry_mc,
+            "current_mc":     current_mc,
+            "peak_mc":        peak_mc,
+            "peak_mult":      peak_mult,
+            "age_str":        c.get("added_at", "")[:10],
+            "discord_msg_id": c.get("discord_msg_id"),  # jump link to original alert
         })
 
     if not leaderboard:

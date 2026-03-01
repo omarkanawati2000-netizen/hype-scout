@@ -179,24 +179,37 @@ def format_single_runner(r: dict, platform: str = "discord") -> str:
 
     [Chart] · [Pump]
     """
-    name       = r.get("name", r.get("symbol", "?"))
-    thresh     = r.get("thresh", 2.0)
-    mult       = r.get("mult", thresh)
-    entry_mc   = r.get("entry_mc", 0)
-    current_mc = r.get("current_mc", 0)
-    mint       = r.get("mint", "")
+    name           = r.get("name", r.get("symbol", "?"))
+    thresh         = r.get("thresh", 2.0)
+    mult           = r.get("mult", thresh)
+    entry_mc       = r.get("entry_mc", 0)
+    current_mc     = r.get("current_mc", 0)
+    mint           = r.get("mint", "")
+    discord_msg_id = r.get("discord_msg_id")
 
     # Show actual current multiplier (rounded to 1 decimal)
     mult_display = f"{mult:.1f}".rstrip('0').rstrip('.')
     bags         = _money_bags(mult)
     mc_arrow     = f"{fmt_usd(entry_mc)} —> {fmt_usd(current_mc)}"
-    dex_url    = f"https://dexscreener.com/solana/{mint}"
-    pump_url   = f"https://pump.fun/{mint}"
+    dex_url      = f"https://dexscreener.com/solana/{mint}"
+    pump_url     = f"https://pump.fun/{mint}"
+
+    # Jump link to original scan alert in #early-trending
+    GUILD_ID    = "1468193294432604326"
+    CHANNEL_ID  = "1477161564460159097"
+    jump_url    = (
+        f"https://discord.com/channels/{GUILD_ID}/{CHANNEL_ID}/{discord_msg_id}"
+        if discord_msg_id else None
+    )
 
     if platform == "telegram":
+        signal_line = (
+            f'from <a href="{jump_url}">⚡ PumpScanner Signal</a>'
+            if jump_url else "from ⚡ PumpScanner Signal"
+        )
         return (
             f"📈 <b>{name}</b> is up <b>{mult_display}X</b> 📈\n"
-            f"from ⚡ PumpScanner Signal\n"
+            f"{signal_line}\n"
             f"\n"
             f"{mc_arrow} 💵\n"
             f"\n"
@@ -207,9 +220,13 @@ def format_single_runner(r: dict, platform: str = "discord") -> str:
             f'<a href="{dex_url}">Chart</a> · <a href="{pump_url}">Pump</a>'
         )
     else:  # discord
+        signal_line = (
+            f"from [⚡ PumpScanner Signal](<{jump_url}>)"
+            if jump_url else "from ⚡ PumpScanner Signal"
+        )
         return (
             f"📈 **{name}** is up **{mult_display}X** 📈\n"
-            f"from ⚡ PumpScanner Signal\n"
+            f"{signal_line}\n"
             f"\n"
             f"{mc_arrow} 💵\n"
             f"\n"
@@ -264,28 +281,41 @@ def format_leaderboard(coins: list, platform: str = "discord") -> str:
     medal = ["🥇", "🥈", "🥉"]
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
+    GUILD_ID   = "1468193294432604326"
+    ALERT_CH   = "1477161564460159097"
+
     if platform == "telegram":
         lines = [f"🏆 <b>PumpScanner Leaderboard</b> · Top {len(coins)} · {now}", "━━━━━━━━━━━━━━━━━━━━━━"]
         for i, c in enumerate(coins):
-            rank  = medal[i] if i < 3 else f"#{i+1}"
-            emoji = tier_emoji(c["peak_mult"])
-            mint  = c.get("mint", "")
-            link  = f'<a href="https://pump.fun/{mint}">Chart</a>' if mint else ""
+            rank   = medal[i] if i < 3 else f"#{i+1}"
+            emoji  = tier_emoji(c["peak_mult"])
+            mint   = c.get("mint", "")
+            msg_id = c.get("discord_msg_id")
+            if msg_id:
+                alert_link = f'<a href="https://discord.com/channels/{GUILD_ID}/{ALERT_CH}/{msg_id}">Alert</a>'
+            else:
+                alert_link = f'<a href="https://pump.fun/{mint}">Chart</a>'
             lines.append(
                 f"{rank} {emoji} <b>{c['name']}</b> — <b>{c['peak_mult']:.1f}x</b>\n"
-                f"    {fmt_usd(c['entry_mc'])} → {fmt_usd(c['peak_mc'])} | {c.get('age_str', '')} {link}"
+                f"    {fmt_usd(c['entry_mc'])} → {fmt_usd(c['peak_mc'])} | {c.get('age_str', '')} {alert_link}"
             )
     else:
         lines = [f"🏆 **PumpScanner Leaderboard** · Top {len(coins)} · {now}", "━━━━━━━━━━━━━━━━━━━━━━"]
         for i, c in enumerate(coins):
-            rank = medal[i] if i < 3 else f"#{i+1}"
-            emoji = tier_emoji(c["peak_mult"])
-            mint = c.get("mint", "")
+            rank   = medal[i] if i < 3 else f"#{i+1}"
+            emoji  = tier_emoji(c["peak_mult"])
+            mint   = c.get("mint", "")
+            msg_id = c.get("discord_msg_id")
             dex_url = f"https://dexscreener.com/solana/{mint}"
+            if msg_id:
+                jump_url   = f"https://discord.com/channels/{GUILD_ID}/{ALERT_CH}/{msg_id}"
+                alert_link = f"[Alert](<{jump_url}>) · [Chart](<{dex_url}>)"
+            else:
+                alert_link = f"[Chart](<{dex_url}>)"
             lines.append(
                 f"{rank} {emoji} **{c['name']}** — **{c['peak_mult']:.1f}x** "
                 f"({fmt_usd(c['entry_mc'])} → {fmt_usd(c['peak_mc'])}) "
-                f"[Chart](<{dex_url}>)"
+                f"{alert_link}"
             )
 
     lines.append("━━━━━━━━━━━━━━━━━━━━━━")

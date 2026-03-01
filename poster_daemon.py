@@ -88,7 +88,7 @@ def release_lock():
 
 # ── Build tracker entry ───────────────────────────────────────────────────────
 
-def make_tracked_entry(d: dict) -> dict:
+def make_tracked_entry(d: dict, discord_msg_id: str = None) -> dict:
     return {
         "mint":            d.get("mint"),
         "name":            d.get("name"),
@@ -104,6 +104,7 @@ def make_tracked_entry(d: dict) -> dict:
         "added_at":        datetime.now().isoformat(),
         "pump_alerts":     {},
         "last_check":      None,
+        "discord_msg_id":  discord_msg_id,   # original scan alert message ID
     }
 
 
@@ -139,17 +140,17 @@ def process_queue():
             posted_mints.add(mint)
             continue
 
-        # Post to Discord
-        discord_ok = discord.post_alert(discord_msg)
+        # Post to Discord — capture message ID for jump links
+        discord_msg_id = discord.post_alert(discord_msg)
 
         # Post to Telegram subscribers
         tg_ok = 0
         if telegram and telegram_msg:
             tg_ok = telegram.broadcast_alert(best)
 
-        if discord_ok:
+        if discord_msg_id:
             posted_mints.add(mint)
-            append_tracked(make_tracked_entry(best))
+            append_tracked(make_tracked_entry(best, discord_msg_id=discord_msg_id))
             logger.info(
                 f"✅ {best.get('name')} ${best.get('market_cap', 0):,.0f} "
                 f"| Discord ✓ | Telegram: {tg_ok} subs"

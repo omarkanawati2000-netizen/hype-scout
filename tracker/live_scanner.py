@@ -172,17 +172,18 @@ def run_scan(state: dict) -> dict:
         })
 
         runners.append({
-            "mint":       mint,
-            "name":       coin.get("name", coin.get("symbol", "?")),
-            "symbol":     coin.get("symbol", "?"),
-            "mult":       mult,
-            "thresh":     mult,  # actual mult used for display
-            "entry_mc":   entry_mc,
-            "current_mc": current_mc,
-            "liq":        live["liq"],
-            "vol_h1":     live["vol_h1"],
-            "buys_h1":    live["buys_h1"],
-            "sells_h1":   live["sells_h1"],
+            "mint":           mint,
+            "name":           coin.get("name", coin.get("symbol", "?")),
+            "symbol":         coin.get("symbol", "?"),
+            "mult":           mult,
+            "thresh":         mult,
+            "entry_mc":       entry_mc,
+            "current_mc":     current_mc,
+            "liq":            live["liq"],
+            "vol_h1":         live["vol_h1"],
+            "buys_h1":        live["buys_h1"],
+            "sells_h1":       live["sells_h1"],
+            "discord_msg_id": coin.get("discord_msg_id"),  # jump link to original alert
         })
 
     state["last_scan"] = now

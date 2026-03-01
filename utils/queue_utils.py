@@ -162,10 +162,16 @@ def append_milestone(entry: dict):
         logger.error(f"Milestone append error: {e}")
 
 
-def load_milestones() -> list:
-    """Load all performance milestones."""
+def load_milestones(max_age_hours: int = 0) -> list:
+    """Load performance milestones, optionally filtered by age.
+
+    Normalises 'multiplier' -> 'mult' so callers always get 'mult'.
+    Returns entries sorted newest-first.
+    """
     if not MILESTONES_FILE.exists():
         return []
+    import time as _time
+    cutoff = _time.time() - max_age_hours * 3600 if max_age_hours > 0 else 0
     entries = []
     try:
         with open(MILESTONES_FILE, "r", encoding="utf-8", errors="replace") as f:
@@ -173,7 +179,13 @@ def load_milestones() -> list:
                 line = line.strip()
                 if line:
                     try:
-                        entries.append(json.loads(line))
+                        e = json.loads(line)
+                        # normalise field name
+                        if "multiplier" in e and "mult" not in e:
+                            e["mult"] = e["multiplier"]
+                        if cutoff and e.get("timestamp", 0) < cutoff:
+                            continue
+                        entries.append(e)
                     except Exception:
                         pass
     except Exception as e:

@@ -31,8 +31,14 @@ from config import (
     POLLER_LOCK, LOG_DIR,
 )
 from utils.dexscreener import get_volume
-from utils.helius import get_holder_count
+from utils.helius import get_holder_count, get_holder_concentration
 from utils.queue_utils import append_to_queue, append_seen_mint, load_seen_mints
+
+# ── Filter thresholds ─────────────────────────────────────────────────────────
+MAX_TOP3_PCT      = 60.0   # skip if top 3 wallets hold > 60% of supply (bundle)
+MAX_TOP1_PCT      = 50.0   # skip if single wallet holds > 50% of supply
+MAX_BUY_SELL_RATIO = 8.0   # skip if buys:sells > 8:1 (only for tokens > 10 min old)
+MIN_AGE_FOR_BS_CHECK = 10  # minutes — don't apply buy/sell filter to brand new tokens
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -117,6 +123,8 @@ async def analyze_token(token: dict) -> dict | None:
         real_sol   = token.get("real_sol_reserves", 0)
         virt_sol   = token.get("virtual_sol_reserves", real_sol + 1)
         bc_pct     = (real_sol / virt_sol * 100) if virt_sol > 0 else 0
+        created_ms = token.get("created_timestamp", 0)
+        age_minutes = ((datetime.now().timestamp() * 1000) - created_ms) / 60000
 
         # Apply filters
         if not (MC_MIN_USD <= mc <= MC_MAX_USD):
@@ -132,14 +140,36 @@ async def analyze_token(token: dict) -> dict | None:
             logger.debug(f"Filtered {name}: only {holder_count} holders")
             return None
 
-        # Volume data
+        # Volume data (needed for buy/sell ratio check)
         vol_data = get_volume(mint)
 
+        # ── Buy/sell ratio filter ─────────────────────────────────────────────
+        # Skip tokens >10 min old with extremely lopsided buy pressure (fake demand)
+        buys  = vol_data.get("buys_h1", 0) or 0
+        sells = vol_data.get("sells_h1", 0) or 0
+        if age_minutes > MIN_AGE_FOR_BS_CHECK and sells > 0:
+            ratio = buys / sells
+            if ratio > MAX_BUY_SELL_RATIO:
+                logger.info(f"Filtered {name}: buy/sell ratio {ratio:.1f}:1 (max {MAX_BUY_SELL_RATIO}:1)")
+                return None
+        elif age_minutes > MIN_AGE_FOR_BS_CHECK and sells == 0 and buys > 20:
+            # 20+ buys, zero sells after 10 min = coordinated pump
+            logger.info(f"Filtered {name}: {buys} buys, 0 sells after {age_minutes:.0f}min")
+            return None
+
+        # ── Bundle / whale concentration filter ──────────────────────────────
+        concentration = get_holder_concentration(mint)
+        if concentration:
+            if concentration["top1_pct"] > MAX_TOP1_PCT:
+                logger.info(f"Filtered {name}: top wallet holds {concentration['top1_pct']}% of supply")
+                return None
+            if concentration["top3_pct"] > MAX_TOP3_PCT:
+                logger.info(f"Filtered {name}: top 3 wallets hold {concentration['top3_pct']}% of supply (bundle)")
+                return None
+
         # Compute derived fields
-        liq_usd     = (real_sol / 1e9) * 200  # estimate: 1 SOL ≈ $200
-        created_ms  = token.get("created_timestamp", 0)
-        age_minutes = ((datetime.now().timestamp() * 1000) - created_ms) / 60000
-        ath         = token.get("ath_market_cap", mc)
+        liq_usd = (real_sol / 1e9) * 200  # estimate: 1 SOL ≈ $200
+        ath     = token.get("ath_market_cap", mc)
 
         return {
             "mint":                    mint,

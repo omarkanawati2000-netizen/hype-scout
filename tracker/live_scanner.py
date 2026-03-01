@@ -212,6 +212,13 @@ def run_scan(state: dict) -> dict:
         logger.error(f"Telegram init: {e}")
         telegram = None
 
+    try:
+        from notifier.twitter_poster import TwitterPoster
+        twitter = TwitterPoster()
+    except Exception as e:
+        logger.error(f"Twitter init: {e}")
+        twitter = None
+
     for r in runners:
         discord_msg  = format_single_runner(r, platform="discord")
         telegram_msg = format_single_runner(r, platform="telegram")
@@ -228,7 +235,22 @@ def run_scan(state: dict) -> dict:
             except Exception as e:
                 logger.error(f"Telegram post ({r['name']}): {e}")
 
-        time.sleep(0.3)  # brief gap between individual posts
+        if twitter:
+            try:
+                twitter.post_runner(r)
+            except Exception as e:
+                logger.error(f"Twitter post ({r['name']}): {e}")
+
+        time.sleep(0.5)  # brief gap between individual posts
+
+    # ── Recap tweets (3h / 12h) ───────────────────────────────────────────────
+    if twitter:
+        try:
+            from utils.queue_utils import load_milestones
+            recent = load_milestones(max_age_hours=12)
+            twitter.maybe_post_recap(recent)
+        except Exception as e:
+            logger.error(f"Recap tweet error: {e}")
 
     return state
 

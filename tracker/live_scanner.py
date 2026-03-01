@@ -131,8 +131,24 @@ def main():
         print("QUIET")
         return
 
-    msg = format_runner_msg(runners, platform="discord")
-    print(f"LIVE|{msg}")
+    discord_msg  = format_runner_msg(runners, platform="discord")
+    telegram_msg = format_runner_msg(runners, platform="telegram")
+
+    # Post directly to Discord #early-trending-runners
+    try:
+        from notifier.discord_poster import DiscordPoster
+        DiscordPoster().post_runner(discord_msg)
+    except Exception as e:
+        pass
+
+    # Broadcast to all Telegram subscribers
+    try:
+        from notifier.telegram_bot import TelegramNotifier
+        TelegramNotifier().broadcast_text(telegram_msg)
+    except Exception as e:
+        pass
+
+    print(f"LIVE|{discord_msg}")
 
 
 if __name__ == "__main__":

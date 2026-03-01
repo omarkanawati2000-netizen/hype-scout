@@ -134,6 +134,31 @@ def main():
     state["seen_keys"]   = list(seen_keys | set(best_mult.keys()))
     save_state(state)
 
+    # Post to Discord + Telegram
+    try:
+        from notifier.discord_poster import DiscordPoster
+        DiscordPoster().post_runner(msg)
+    except Exception:
+        pass
+    try:
+        from notifier.telegram_bot import TelegramNotifier
+        # Convert to Telegram HTML (rebuild with platform=telegram)
+        tg_lines = ["📬 <b>MILESTONE DIGEST</b> · " + now_str, "━━━━━━━━━━━━━━━━━━━━━━"]
+        for h in hits:
+            from utils.formatter import tier_emoji, fmt_usd
+            emoji = tier_emoji(h["mult"])
+            mint  = h["mint"]
+            tg_lines.append(
+                f'{emoji} <b>{h["name"]}</b> hit <b>{h["mult"]:.1f}x</b> '
+                f'({fmt_usd(h["entry_mc"])} → {fmt_usd(h["peak_mc"])})\n'
+                f'    <a href="https://dexscreener.com/solana/{mint}">Chart</a> · '
+                f'<a href="https://pump.fun/{mint}">Pump</a>'
+            )
+        tg_lines.append("━━━━━━━━━━━━━━━━━━━━━━")
+        TelegramNotifier().broadcast_text("\n".join(tg_lines))
+    except Exception:
+        pass
+
     print(f"DIGEST|{msg}")
 
 

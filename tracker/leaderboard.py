@@ -98,12 +98,25 @@ def main():
     leaderboard.sort(key=lambda x: -x["peak_mult"])
     top = leaderboard[:LEADERBOARD_SIZE]
 
-    msg = format_leaderboard(top, platform="discord")
+    discord_msg  = format_leaderboard(top, platform="discord")
+    telegram_msg = format_leaderboard(top, platform="telegram")
 
     state["last_posted"] = now
     save_state(state)
 
-    print(f"LEADERBOARD|{msg}")
+    # Post to Discord + Telegram
+    try:
+        from notifier.discord_poster import DiscordPoster
+        DiscordPoster().post_runner(discord_msg)
+    except Exception:
+        pass
+    try:
+        from notifier.telegram_bot import TelegramNotifier
+        TelegramNotifier().broadcast_text(telegram_msg)
+    except Exception:
+        pass
+
+    print(f"LEADERBOARD|{discord_msg}")
 
 
 if __name__ == "__main__":

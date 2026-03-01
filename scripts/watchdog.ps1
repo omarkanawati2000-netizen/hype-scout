@@ -52,11 +52,12 @@ function Kill-Duplicates($pattern, $lockFile) {
     }
 }
 
-Kill-Duplicates "poster_daemon" "data\poster.lock"
-Kill-Duplicates "poller.py"    "data\poller.lock"
+Kill-Duplicates "poster_daemon"  "data\poster.lock"
+Kill-Duplicates "poller.py"     "data\poller.lock"
+Kill-Duplicates "live_scanner"  "data\live_scanner.lock"
 
 # Clear stale locks if owner process is dead
-foreach ($lock in @("data\poller.lock", "data\poster.lock")) {
+foreach ($lock in @("data\poller.lock", "data\poster.lock", "data\live_scanner.lock")) {
     $lockPath = Join-Path $ProjectDir $lock
     if (Test-Path $lockPath) {
         $pid_str = Get-Content $lockPath -ErrorAction SilentlyContinue
@@ -86,6 +87,16 @@ if (-not (Is-AliveViaPid "data\poster.lock")) {
     Start-Component "poster" "poster_daemon.py"
 } else {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Poster OK"
+}
+
+Start-Sleep -Seconds 2
+
+# Live Scanner daemon — check via lock file PID
+if (-not (Is-AliveViaPid "data\live_scanner.lock")) {
+    Remove-Item "$ProjectDir\data\live_scanner.lock" -Force -ErrorAction SilentlyContinue
+    Start-Component "live_scanner" "tracker/live_scanner.py"
+} else {
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Live Scanner OK"
 }
 
 Start-Sleep -Seconds 2

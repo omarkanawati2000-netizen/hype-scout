@@ -155,6 +155,67 @@ def format_telegram_alert(d: dict) -> str:
     )
 
 
+# ── Single Runner Alert (new format) ──────────────────────────────────────────
+
+def _money_bags(thresh: float) -> str:
+    """Scale 💸 emoji count with tier: 2x→4, 3x→6, 5x→8, 10x→12, 20x→16."""
+    tiers = {2: 4, 3: 6, 5: 8, 10: 12, 20: 16}
+    count = tiers.get(int(thresh), max(4, int(thresh) * 2))
+    count = min(count, 16)
+    return "💸" * count
+
+
+def format_single_runner(r: dict, platform: str = "discord") -> str:
+    """
+    Format a single-coin runner alert in the clean pump style.
+
+    📈 COIN is up 3X 📈
+    from ⚡ Entry Signal
+
+    $50.7K —> $150K 💵
+
+    💸💸💸💸💸💸
+
+    [Chart] · [Pump]
+    """
+    name       = r.get("name", r.get("symbol", "?"))
+    thresh     = r.get("thresh", 2.0)
+    mult       = r.get("mult", thresh)
+    entry_mc   = r.get("entry_mc", 0)
+    current_mc = r.get("current_mc", 0)
+    mint       = r.get("mint", "")
+
+    # Show threshold tier as the headline (clean: 2X, 3X, 5X, 10X, 20X)
+    thresh_int = int(thresh)
+    bags       = _money_bags(thresh)
+    mc_arrow   = f"{fmt_usd(entry_mc)} —> {fmt_usd(current_mc)}"
+    dex_url    = f"https://dexscreener.com/solana/{mint}"
+    pump_url   = f"https://pump.fun/{mint}"
+
+    if platform == "telegram":
+        return (
+            f"📈 <b>{name}</b> is up <b>{thresh_int}X</b> 📈\n"
+            f"from ⚡ Entry Signal\n"
+            f"\n"
+            f"{mc_arrow} 💵\n"
+            f"\n"
+            f"{bags}\n"
+            f"\n"
+            f'<a href="{dex_url}">Chart</a> · <a href="{pump_url}">Pump</a>'
+        )
+    else:  # discord
+        return (
+            f"📈 **{name}** is up **{thresh_int}X** 📈\n"
+            f"from ⚡ Entry Signal\n"
+            f"\n"
+            f"{mc_arrow} 💵\n"
+            f"\n"
+            f"{bags}\n"
+            f"\n"
+            f"[Chart](<{dex_url}>) · [Pump](<{pump_url}>)"
+        )
+
+
 # ── Runner Messages ────────────────────────────────────────────────────────────
 
 def format_runner_msg(runners: list, platform: str = "discord") -> str:

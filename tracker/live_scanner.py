@@ -30,7 +30,7 @@ from config import (
     TRACK_MAX_AGE_HOURS,
 )
 from utils.dexscreener import get_live_mc_batch
-from utils.formatter import format_runner_msg
+from utils.formatter import format_single_runner
 from utils.queue_utils import load_tracked, append_milestone
 
 SCAN_INTERVAL = 300  # 5 minutes
@@ -149,22 +149,38 @@ def main():
         print(f"QUIET|Scanned {len(mints)} coins, 0 runners")
         return
 
-    discord_msg  = format_runner_msg(runners, platform="discord")
-    telegram_msg = format_runner_msg(runners, platform="telegram")
-
-    # Post directly to Discord #early-trending-runners
+    # Post one alert per runner (individual messages, not batched)
+    discord_poster  = None
+    telegram_notif  = None
     try:
         from notifier.discord_poster import DiscordPoster
-        DiscordPoster().post_runner(discord_msg)
+        discord_poster = DiscordPoster()
     except Exception as e:
-        print(f"Discord post error: {e}", file=sys.stderr)
+        print(f"Discord init error: {e}", file=sys.stderr)
 
-    # Broadcast to all Telegram subscribers
     try:
         from notifier.telegram_bot import TelegramNotifier
-        TelegramNotifier().broadcast_text(telegram_msg)
+        telegram_notif = TelegramNotifier()
     except Exception as e:
-        print(f"Telegram broadcast error: {e}", file=sys.stderr)
+        print(f"Telegram init error: {e}", file=sys.stderr)
+
+    for r in runners:
+        discord_msg  = format_single_runner(r, platform="discord")
+        telegram_msg = format_single_runner(r, platform="telegram")
+
+        if discord_poster:
+            try:
+                discord_poster.post_runner(discord_msg)
+            except Exception as e:
+                print(f"Discord post error ({r['name']}): {e}", file=sys.stderr)
+
+        if telegram_notif:
+            try:
+                telegram_notif.broadcast_text(telegram_msg)
+            except Exception as e:
+                print(f"Telegram post error ({r['name']}): {e}", file=sys.stderr)
+
+        time.sleep(0.5)  # slight gap between posts
 
     summary = ", ".join(f"{r['name']} {r['mult']}x" for r in runners[:5])
     print(f"LIVE|{len(runners)} runners: {summary}")

@@ -24,7 +24,7 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import TELEGRAM_BOT_TOKEN, SUBSCRIBERS_FILE, PENDING_FILE, TRACKED_FILE, QUEUE_FILE, TELEGRAM_ADMIN_IDS
+from config import TELEGRAM_BOT_TOKEN, SUBSCRIBERS_FILE, PENDING_FILE, TRACKED_FILE, QUEUE_FILE, TELEGRAM_ADMIN_IDS, TELEGRAM_CHANNEL_ID
 from utils.formatter import format_telegram_alert, format_runner_msg, format_leaderboard, fmt_usd, tier_emoji
 from utils.queue_utils import load_tracked, load_milestones
 
@@ -169,25 +169,35 @@ class TelegramNotifier:
             logger.error(f"Telegram send error: {e}")
             return False
 
+    def _all_targets(self) -> list:
+        """All chat IDs to broadcast to: subscribers + public channel (if set)."""
+        targets = list(load_subscribers())
+        if TELEGRAM_CHANNEL_ID:
+            try:
+                ch = int(TELEGRAM_CHANNEL_ID)
+                if ch not in targets:
+                    targets.append(ch)
+            except ValueError:
+                pass
+        return targets
+
     def broadcast_alert(self, alert_dict: dict) -> int:
-        """Broadcast a token alert to all subscribers. Returns success count."""
+        """Broadcast a token alert to all subscribers + public channel."""
         if not self.token:
             return 0
         msg  = format_telegram_alert(alert_dict)
-        subs = load_subscribers()  # returns list of int chat_ids
         ok   = 0
-        for chat_id in subs:
+        for chat_id in self._all_targets():
             if self._send(chat_id, msg):
                 ok += 1
         return ok
 
     def broadcast_text(self, text: str) -> int:
-        """Broadcast raw HTML text to all subscribers."""
+        """Broadcast raw HTML text to all subscribers + public channel."""
         if not self.token:
             return 0
-        subs = load_subscribers()
-        ok   = 0
-        for chat_id in subs:
+        ok = 0
+        for chat_id in self._all_targets():
             if self._send(chat_id, text):
                 ok += 1
         return ok

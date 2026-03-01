@@ -283,8 +283,48 @@ async def run_bot():
     app.add_handler(CommandHandler("leaderboard", cmd_leaderboard))
     app.add_handler(CommandHandler("help", cmd_help))
 
-    logger.info("Telegram bot starting polling...")
-    await app.run_polling(allowed_updates=["message"])
+    return app
+
+
+def start_bot():
+    """Start the Telegram bot — manages its own event loop (PTB 20+ style)."""
+    try:
+        from telegram.ext import Application
+    except ImportError:
+        print("Run: pip install python-telegram-bot>=20.0")
+        sys.exit(1)
+
+    if not TELEGRAM_BOT_TOKEN:
+        print("Set TELEGRAM_BOT_TOKEN in .env")
+        sys.exit(1)
+
+    logger.info("Starting Telegram bot polling...")
+
+    async def _build_and_run():
+        app = await run_bot()
+        # run_polling manages its own lifecycle
+        async with app:
+            await app.start()
+            await app.updater.start_polling(allowed_updates=["message"])
+            logger.info("Telegram bot is live. Press Ctrl+C to stop.")
+            # Keep running until interrupted
+            import signal as sig
+            stop_event = asyncio.Event()
+            loop = asyncio.get_running_loop()
+            for s in (sig.SIGINT, sig.SIGTERM):
+                try:
+                    loop.add_signal_handler(s, stop_event.set)
+                except NotImplementedError:
+                    pass  # Windows doesn't support add_signal_handler
+            try:
+                await stop_event.wait()
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                pass
+            finally:
+                await app.updater.stop()
+                await app.stop()
+
+    asyncio.run(_build_and_run())
 
 
 if __name__ == "__main__":
@@ -292,4 +332,4 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
-    asyncio.run(run_bot())
+    start_bot()

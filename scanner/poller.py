@@ -31,12 +31,11 @@ from config import (
     POLLER_LOCK, LOG_DIR,
 )
 from utils.dexscreener import get_volume
-from utils.helius import get_holder_count, get_holder_concentration
+from utils.helius import get_holder_count, get_dev_holding_pct
 from utils.queue_utils import append_to_queue, append_seen_mint, load_seen_mints
 
 # ── Filter thresholds ─────────────────────────────────────────────────────────
-MAX_TOP3_PCT      = 60.0   # skip if top 3 wallets hold > 60% of supply (bundle)
-MAX_TOP1_PCT      = 50.0   # skip if single wallet holds > 50% of supply
+MAX_DEV_PCT        = 15.0  # skip if creator holds > 15% of supply
 MAX_BUY_SELL_RATIO = 8.0   # skip if buys:sells > 8:1 (only for tokens > 10 min old)
 MIN_AGE_FOR_BS_CHECK = 10  # minutes — don't apply buy/sell filter to brand new tokens
 
@@ -157,14 +156,13 @@ async def analyze_token(token: dict) -> dict | None:
             logger.info(f"Filtered {name}: {buys} buys, 0 sells after {age_minutes:.0f}min")
             return None
 
-        # ── Bundle / whale concentration filter ──────────────────────────────
-        concentration = get_holder_concentration(mint)
-        if concentration:
-            if concentration["top1_pct"] > MAX_TOP1_PCT:
-                logger.info(f"Filtered {name}: top wallet holds {concentration['top1_pct']}% of supply")
-                return None
-            if concentration["top3_pct"] > MAX_TOP3_PCT:
-                logger.info(f"Filtered {name}: top 3 wallets hold {concentration['top3_pct']}% of supply (bundle)")
+        # ── Dev wallet holding filter ─────────────────────────────────────────
+        # Check if the creator is holding a large chunk of supply (rug setup)
+        creator = token.get("creator", "")
+        if creator:
+            dev_pct = get_dev_holding_pct(mint, creator)
+            if dev_pct is not None and dev_pct > MAX_DEV_PCT:
+                logger.info(f"Filtered {name}: dev holds {dev_pct:.1f}% of supply (max {MAX_DEV_PCT}%)")
                 return None
 
         # Compute derived fields
@@ -187,6 +185,7 @@ async def analyze_token(token: dict) -> dict | None:
             "buys_h1":                 vol_data["buys_h1"],
             "sells_h1":                vol_data["sells_h1"],
             "created_at":              token.get("created_timestamp"),
+            "creator":                 token.get("creator", ""),
             "twitter":                 token.get("twitter"),
             "dexscreener_url":         f"https://dexscreener.com/solana/{mint}",
             "pump_url":                f"https://pump.fun/{mint}",

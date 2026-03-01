@@ -42,6 +42,64 @@ def get_holder_count(mint: str) -> int | None:
     return None
 
 
+def get_dev_holding_pct(mint: str, creator: str) -> float | None:
+    """
+    Returns the percentage of total supply held by the dev/creator wallet.
+
+    Makes 2 sequential RPC calls:
+      1. getTokenAccountsByOwner  → creator's token balance for this mint
+      2. getTokenSupply           → total supply
+
+    Returns float (0–100) or None if data unavailable.
+    Returns 0.0 if creator holds nothing (clean).
+    """
+    if not HELIUS_RPC_URL or not creator:
+        return None
+    try:
+        # 1 — creator's token accounts for this mint
+        r1 = requests.post(HELIUS_RPC_URL, timeout=_TIMEOUT, json={
+            "jsonrpc": "2.0", "id": 1,
+            "method":  "getTokenAccountsByOwner",
+            "params":  [creator, {"mint": mint}, {"encoding": "jsonParsed"}],
+        }).json()
+
+        accounts = r1.get("result", {}).get("value", [])
+        dev_balance = sum(
+            float(
+                a.get("account", {})
+                 .get("data", {})
+                 .get("parsed", {})
+                 .get("info", {})
+                 .get("tokenAmount", {})
+                 .get("uiAmount") or 0
+            )
+            for a in accounts
+        )
+
+        if dev_balance == 0:
+            return 0.0  # clean — dev holds nothing
+
+        # 2 — total supply
+        r2 = requests.post(HELIUS_RPC_URL, timeout=_TIMEOUT, json={
+            "jsonrpc": "2.0", "id": 2,
+            "method":  "getTokenSupply",
+            "params":  [mint],
+        }).json()
+
+        total_supply = float(
+            r2.get("result", {}).get("value", {}).get("uiAmount") or 0
+        )
+
+        if total_supply <= 0:
+            return None
+
+        return round((dev_balance / total_supply) * 100, 1)
+
+    except Exception as e:
+        logger.debug(f"Dev holding check error for {mint}: {e}")
+        return None
+
+
 def get_holder_concentration(mint: str) -> dict | None:
     """
     Returns top-holder concentration data for bundle/whale detection.
@@ -60,18 +118,17 @@ def get_holder_concentration(mint: str) -> dict | None:
     if not HELIUS_RPC_URL or "your-api-key" in HELIUS_RPC_URL.lower():
         return None
     try:
-        batch = [
-            {"jsonrpc": "2.0", "id": 1, "method": "getTokenLargestAccounts", "params": [mint]},
-            {"jsonrpc": "2.0", "id": 2, "method": "getTokenSupply",          "params": [mint]},
-        ]
-        resp    = requests.post(HELIUS_RPC_URL, json=batch, timeout=_TIMEOUT)
-        results = resp.json()
-
-        if not isinstance(results, list) or len(results) < 2:
-            return None
+        # Two separate calls (free plan doesn't support batch RPC)
+        r1 = requests.post(HELIUS_RPC_URL, timeout=_TIMEOUT, json={
+            "jsonrpc": "2.0", "id": 1,
+            "method": "getTokenLargestAccounts", "params": [mint],
+        }).json()
+        r2 = requests.post(HELIUS_RPC_URL, timeout=_TIMEOUT, json={
+            "jsonrpc": "2.0", "id": 2,
+            "method": "getTokenSupply", "params": [mint],
+        }).json()
 
         # Parse largest accounts
-        r1       = next((r for r in results if r.get("id") == 1), {})
         accounts = r1.get("result", {}).get("value", [])
         if not accounts:
             return None
@@ -82,7 +139,6 @@ def get_holder_concentration(mint: str) -> dict | None:
         )
 
         # Parse total supply
-        r2           = next((r for r in results if r.get("id") == 2), {})
         supply_info  = r2.get("result", {}).get("value", {})
         total_supply = float(supply_info.get("uiAmount") or 0)
 

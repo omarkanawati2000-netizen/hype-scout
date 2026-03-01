@@ -208,46 +208,79 @@ async def run_bot():
             await update.message.reply_text("You weren't subscribed.")
 
     async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        import json as _json
         subs  = load_subscribers()
         coins = load_tracked(max_age_hours=24)
-        # Count runners (2x+)
-        runners = [
-            c for c in coins.values()
-            if c.get("entry_mc", 0) > 0 and c.get("current_mc", 0) / max(c.get("entry_mc", 1), 1) >= 2.0
-        ]
+
+        # Count confirmed runners from live scan state (accurate, no live fetch needed)
+        runner_count = 0
+        try:
+            from config import LIVE_SCAN_STATE
+            if LIVE_SCAN_STATE.exists():
+                scan_state = _json.loads(LIVE_SCAN_STATE.read_text(encoding="utf-8"))
+                runner_count = sum(1 for alerts in scan_state.get("alerts", {}).values() if alerts)
+        except Exception:
+            pass
+
+        # Queue depth
+        queue_depth = 0
+        try:
+            from config import QUEUE_FILE
+            if QUEUE_FILE.exists():
+                queue_depth = sum(
+                    1 for line in QUEUE_FILE.read_text(encoding="utf-8").splitlines()
+                    if line.strip() and not _json.loads(line).get("posted", True)
+                )
+        except Exception:
+            pass
+
         await update.message.reply_html(
             f"📊 <b>Hype Scout Status</b>\n\n"
             f"👥 Subscribers: <b>{len(subs)}</b>\n"
             f"🪙 Coins tracked (24h): <b>{len(coins)}</b>\n"
-            f"🚀 Active runners (2x+): <b>{len(runners)}</b>\n"
-            f"🕐 Last updated: {datetime.now().strftime('%H:%M:%S UTC')}"
+            f"🚀 Coins w/ alerts fired: <b>{runner_count}</b>\n"
+            f"📥 Queue pending: <b>{queue_depth}</b>\n"
+            f"🕐 {datetime.now().strftime('%H:%M:%S')} MST"
         )
 
     async def cmd_runners(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        from utils.dexscreener import get_live_mc
+        import time as _time
+
+        await update.message.reply_text("🔍 Fetching live prices... (this takes ~10s)")
+
         coins = load_tracked(max_age_hours=24)
         runners = []
-        for c in coins.values():
+
+        for mint, c in coins.items():
             entry_mc = c.get("entry_mc", 0)
             if entry_mc <= 0:
                 continue
-            current_mc = c.get("current_mc", 0)
-            mult = round(current_mc / entry_mc, 1)
+            # Fetch LIVE market cap from DexScreener
+            live = get_live_mc(mint)
+            if not live or live["mc"] <= 0:
+                continue
+            current_mc = live["mc"]
+            mult = round(current_mc / max(entry_mc, 1), 1)
             if mult >= 2.0:
                 runners.append({
-                    "mint":       c.get("mint", ""),
+                    "mint":       mint,
                     "name":       c.get("name", "?"),
                     "symbol":     c.get("symbol", "?"),
                     "mult":       mult,
                     "entry_mc":   entry_mc,
                     "current_mc": current_mc,
-                    "liq":        c.get("liq", 0),
-                    "vol_h1":     c.get("vol_h1", 0),
-                    "buys_h1":    c.get("buys_h1", 0),
-                    "sells_h1":   c.get("sells_h1", 0),
+                    "liq":        live.get("liq", 0),
+                    "vol_h1":     live.get("vol_h1", 0),
+                    "buys_h1":    live.get("buys_h1", 0),
+                    "sells_h1":   live.get("sells_h1", 0),
                 })
+            _time.sleep(0.3)  # DexScreener rate limit
+
         if not runners:
             await update.message.reply_text("No active runners right now. Check back soon! 👀")
             return
+
         runners.sort(key=lambda x: -x["mult"])
         msg = format_runner_msg(runners[:10], platform="telegram")
         await update.message.reply_html(msg)

@@ -34,7 +34,28 @@ function Start-Component($name, $script, $args = "") {
 
 Set-Location $ProjectDir
 
-# Clear stale locks if process is dead
+# Kill any duplicate processes (keep only lock-file owner alive)
+function Kill-Duplicates($pattern, $lockFile) {
+    $lockPath = Join-Path $ProjectDir $lockFile
+    $ownerPid = $null
+    if (Test-Path $lockPath) {
+        $ownerPid = [int](Get-Content $lockPath -ErrorAction SilentlyContinue)
+    }
+    $procs = @(Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like "*$pattern*" })
+    if ($procs.Count -gt 1) {
+        foreach ($p in $procs) {
+            if ($p.ProcessId -ne $ownerPid) {
+                Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+                Write-Host "Killed duplicate $pattern PID $($p.ProcessId)"
+            }
+        }
+    }
+}
+
+Kill-Duplicates "poster_daemon" "data\poster.lock"
+Kill-Duplicates "poller.py"    "data\poller.lock"
+
+# Clear stale locks if owner process is dead
 foreach ($lock in @("data\poller.lock", "data\poster.lock")) {
     $lockPath = Join-Path $ProjectDir $lock
     if (Test-Path $lockPath) {

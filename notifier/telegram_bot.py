@@ -210,15 +210,55 @@ class TelegramNotifier:
                     channel_msg_id = msg_id
         return ok, channel_msg_id
 
-    def broadcast_text(self, text: str) -> int:
-        """Broadcast raw HTML text to all subscribers + public channel."""
+    def broadcast_text(self, text: str) -> tuple[int, int | None]:
+        """Broadcast raw HTML text to all subscribers + public channel.
+        Returns (sent_count, channel_message_id).
+        """
         if not self.token:
-            return 0
+            return 0, None
         ok = 0
+        channel_msg_id = None
+        channel_id = None
+        if TELEGRAM_CHANNEL_ID:
+            try:
+                channel_id = int(TELEGRAM_CHANNEL_ID)
+            except ValueError:
+                pass
         for chat_id in self._all_targets():
-            if self._send(chat_id, text):
+            msg_id = self._send(chat_id, text)
+            if msg_id:
                 ok += 1
-        return ok
+                if channel_id and chat_id == channel_id:
+                    channel_msg_id = msg_id
+        return ok, channel_msg_id
+
+    def pin_message(self, chat_id: int | str, message_id: int) -> bool:
+        """Pin a message in a chat/channel. Returns True on success."""
+        import requests as req_lib
+        try:
+            resp = req_lib.post(
+                f"{self._base}/pinChatMessage",
+                json={"chat_id": chat_id, "message_id": message_id, "disable_notification": True},
+                timeout=10,
+            )
+            return resp.ok
+        except Exception as e:
+            logger.error(f"Telegram pin error: {e}")
+            return False
+
+    def unpin_message(self, chat_id: int | str, message_id: int) -> bool:
+        """Unpin a specific message in a chat/channel."""
+        import requests as req_lib
+        try:
+            resp = req_lib.post(
+                f"{self._base}/unpinChatMessage",
+                json={"chat_id": chat_id, "message_id": message_id},
+                timeout=10,
+            )
+            return resp.ok
+        except Exception as e:
+            logger.error(f"Telegram unpin error: {e}")
+            return False
 
     def get_subscriber_count(self) -> int:
         return len(load_subscribers())

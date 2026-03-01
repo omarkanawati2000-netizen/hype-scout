@@ -165,7 +165,18 @@ def main():
 
     try:
         from notifier.telegram_bot import TelegramNotifier
-        TelegramNotifier().broadcast_text(telegram_msg)
+        from config import TELEGRAM_CHANNEL_ID
+        tg = TelegramNotifier()
+        _, tg_msg_id = tg.broadcast_text(telegram_msg)
+
+        if tg_msg_id and TELEGRAM_CHANNEL_ID:
+            ch = int(TELEGRAM_CHANNEL_ID)
+            prev_tg_pin = state.get("pinned_tg_message_id")
+            if prev_tg_pin:
+                tg.unpin_message(ch, prev_tg_pin)
+            if tg.pin_message(ch, tg_msg_id):
+                state["pinned_tg_message_id"] = tg_msg_id
+                save_state(state)
     except Exception as e:
         print(f"Telegram error: {e}", file=sys.stderr)
 

@@ -24,7 +24,7 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import TELEGRAM_BOT_TOKEN, SUBSCRIBERS_FILE, TRACKED_FILE, QUEUE_FILE, TELEGRAM_ADMIN_IDS
+from config import TELEGRAM_BOT_TOKEN, SUBSCRIBERS_FILE, PENDING_FILE, TRACKED_FILE, QUEUE_FILE, TELEGRAM_ADMIN_IDS
 from utils.formatter import format_telegram_alert, format_runner_msg, format_leaderboard, fmt_usd, tier_emoji
 from utils.queue_utils import load_tracked, load_milestones
 
@@ -92,6 +92,55 @@ def get_subscriber_list() -> list:
     """Return list of subscriber info dicts, sorted by join date."""
     raw = load_subscribers_raw()
     return sorted(raw.values(), key=lambda x: x.get("joined_at", ""))
+
+
+# ── Pending request management ────────────────────────────────────────────────
+
+def load_pending() -> dict:
+    """Load pending requests dict {str(chat_id): info}."""
+    if not PENDING_FILE.exists():
+        return {}
+    try:
+        with open(PENDING_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_pending(pending: dict):
+    try:
+        with open(PENDING_FILE, "w", encoding="utf-8") as f:
+            json.dump(pending, f, indent=2)
+    except Exception as e:
+        logger.error(f"Pending save error: {e}")
+
+
+def add_pending(chat_id: int, username: str = "", name: str = "") -> bool:
+    """Add a pending request. Returns False if already pending or subscribed."""
+    if str(chat_id) in load_subscribers_raw():
+        return False  # already subscribed
+    pending = load_pending()
+    key = str(chat_id)
+    if key in pending:
+        return False  # already pending
+    pending[key] = {
+        "chat_id":      chat_id,
+        "username":     username,
+        "name":         name,
+        "requested_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    save_pending(pending)
+    return True
+
+
+def remove_pending(chat_id: int) -> dict | None:
+    """Remove and return a pending request, or None if not found."""
+    pending = load_pending()
+    key = str(chat_id)
+    entry = pending.pop(key, None)
+    if entry:
+        save_pending(pending)
+    return entry
 
 
 # ── TelegramNotifier — broadcast helper ───────────────────────────────────────
@@ -189,14 +238,43 @@ async def run_bot():
     async def cmd_subscribe(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         chat_id  = update.effective_chat.id
         user     = update.effective_user
-        username = f"@{user.username}" if user and user.username else ""
-        name     = user.full_name if user else ""
-        if add_subscriber(chat_id, username=username, name=name):
+        username = f"@{user.username}" if user and user.username else "(no username)"
+        name     = user.full_name if user else "Unknown"
+
+        # Already subscribed?
+        if str(chat_id) in load_subscribers_raw():
+            await update.message.reply_text("You're already subscribed! 🟢")
+            return
+
+        # Already pending?
+        if str(chat_id) in load_pending():
             await update.message.reply_html(
-                "✅ <b>Subscribed!</b> You'll now receive real-time Hype Scout alerts.\n\n"
-                "Use /unsubscribe to stop at any time."
+                "⏳ <b>Your request is pending approval.</b>\n"
+                "You'll get a message when you're approved!"
             )
-            logger.info(f"New subscriber: {name} {username} (chat_id: {chat_id})")
+            return
+
+        # Add to pending + notify admin
+        added = add_pending(chat_id, username=username, name=name)
+        if added:
+            await update.message.reply_html(
+                "📨 <b>Access request sent!</b>\n\n"
+                "The admin will review your request. "
+                "You'll receive a message here once approved. 🙏"
+            )
+            logger.info(f"Access request from: {name} {username} (chat_id: {chat_id})")
+
+            # DM every admin
+            notifier = TelegramNotifier()
+            for admin_id in TELEGRAM_ADMIN_IDS:
+                notifier.send_to(admin_id,
+                    f"🔔 <b>New Subscription Request</b>\n\n"
+                    f"👤 Name: <b>{name}</b>\n"
+                    f"🔖 Username: {username}\n"
+                    f"🆔 Chat ID: <code>{chat_id}</code>\n\n"
+                    f"To approve: <code>/approve {chat_id}</code>\n"
+                    f"To deny:    <code>/deny {chat_id}</code>"
+                )
         else:
             await update.message.reply_text("You're already subscribed! 🟢")
 
@@ -206,6 +284,104 @@ async def run_bot():
             await update.message.reply_text("❌ Unsubscribed. You won't receive alerts anymore.")
         else:
             await update.message.reply_text("You weren't subscribed.")
+
+    async def cmd_approve(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Admin only: /approve <chat_id>"""
+        if TELEGRAM_ADMIN_IDS and update.effective_chat.id not in TELEGRAM_ADMIN_IDS:
+            await update.message.reply_text("⛔ Admin only.")
+            return
+
+        if not ctx.args:
+            await update.message.reply_text("Usage: /approve <chat_id>")
+            return
+
+        try:
+            target_id = int(ctx.args[0])
+        except ValueError:
+            await update.message.reply_text("Invalid chat_id — must be a number.")
+            return
+
+        entry = remove_pending(target_id)
+        if not entry:
+            # Check if already subscribed
+            if str(target_id) in load_subscribers_raw():
+                await update.message.reply_text(f"⚠️ {target_id} is already subscribed.")
+            else:
+                await update.message.reply_text(f"⚠️ No pending request found for {target_id}.")
+            return
+
+        add_subscriber(target_id, username=entry.get("username", ""), name=entry.get("name", ""))
+        name     = entry.get("name", "Unknown")
+        username = entry.get("username", "")
+
+        await update.message.reply_html(f"✅ Approved <b>{name}</b> {username} (<code>{target_id}</code>)")
+
+        # Notify the new subscriber
+        notifier = TelegramNotifier()
+        notifier.send_to(target_id,
+            "✅ <b>You've been approved!</b>\n\n"
+            "Welcome to Hype Scout 🚀 You'll now receive real-time Solana memecoin alerts.\n\n"
+            "Use /unsubscribe anytime to stop."
+        )
+        logger.info(f"Approved subscriber: {name} {username} ({target_id})")
+
+    async def cmd_deny(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Admin only: /deny <chat_id>"""
+        if TELEGRAM_ADMIN_IDS and update.effective_chat.id not in TELEGRAM_ADMIN_IDS:
+            await update.message.reply_text("⛔ Admin only.")
+            return
+
+        if not ctx.args:
+            await update.message.reply_text("Usage: /deny <chat_id>")
+            return
+
+        try:
+            target_id = int(ctx.args[0])
+        except ValueError:
+            await update.message.reply_text("Invalid chat_id — must be a number.")
+            return
+
+        entry = remove_pending(target_id)
+        if not entry:
+            await update.message.reply_text(f"⚠️ No pending request found for {target_id}.")
+            return
+
+        name     = entry.get("name", "Unknown")
+        username = entry.get("username", "")
+        await update.message.reply_html(f"❌ Denied <b>{name}</b> {username} (<code>{target_id}</code>)")
+
+        # Optionally notify the denied user
+        notifier = TelegramNotifier()
+        notifier.send_to(target_id,
+            "❌ <b>Access request denied.</b>\n\n"
+            "Your subscription request was not approved at this time."
+        )
+        logger.info(f"Denied request: {name} {username} ({target_id})")
+
+    async def cmd_pending(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Admin only: show pending requests."""
+        if TELEGRAM_ADMIN_IDS and update.effective_chat.id not in TELEGRAM_ADMIN_IDS:
+            await update.message.reply_text("⛔ Admin only.")
+            return
+
+        pending = load_pending()
+        if not pending:
+            await update.message.reply_text("✅ No pending requests.")
+            return
+
+        lines = [f"⏳ <b>Pending Requests ({len(pending)})</b>\n"]
+        for entry in sorted(pending.values(), key=lambda x: x.get("requested_at", "")):
+            cid      = entry.get("chat_id")
+            name     = entry.get("name", "Unknown")
+            username = entry.get("username", "")
+            when     = entry.get("requested_at", "?")
+            lines.append(
+                f"👤 <b>{name}</b> {username}\n"
+                f"   🆔 <code>{cid}</code> · {when}\n"
+                f"   /approve {cid}  |  /deny {cid}\n"
+            )
+
+        await update.message.reply_html("\n".join(lines))
 
     async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         import json as _json
@@ -348,6 +524,7 @@ async def run_bot():
         import os as _os
 
         # ── Section: Subscribers ──────────────────────────────────────────────
+        pending_count = len(load_pending())
         subs = get_subscriber_list()
         sub_lines = []
         for i, s in enumerate(subs, 1):
@@ -402,7 +579,7 @@ async def run_bot():
             f"🔐 <b>ADMIN PANEL</b> · {datetime.now().strftime('%Y-%m-%d %H:%M')} MST\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
-            f"👥 <b>Subscribers ({len(subs)})</b>\n"
+            f"👥 <b>Subscribers ({len(subs)})</b>  |  ⏳ Pending: {pending_count} (/pending)\n"
             f"{sub_block}\n\n"
 
             f"📊 <b>Win Rate (24h)</b>\n"
@@ -427,13 +604,14 @@ async def run_bot():
     async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_html(
             "🤖 <b>Hype Scout Commands</b>\n\n"
-            "/subscribe — Get real-time token alerts\n"
+            "/subscribe — Request access to real-time alerts\n"
             "/unsubscribe — Stop receiving alerts\n"
             "/status — Scanner stats\n"
             "/runners — Active coins at 2x+ (live)\n"
-            "/leaderboard — Top 10 performers today (live)\n"
+            "/leaderboard — Top performers today (live)\n"
             "/help — This message\n\n"
-            "📡 Scanning Pump.fun every 30 seconds."
+            "📡 Scanning Pump.fun every 30 seconds.\n"
+            "⚠️ Subscriptions require admin approval."
         )
 
     # ── Build and run app ─────────────────────────────────────────────────────
@@ -441,6 +619,9 @@ async def run_bot():
     app.add_handler(CommandHandler("start",       cmd_start))
     app.add_handler(CommandHandler("subscribe",   cmd_subscribe))
     app.add_handler(CommandHandler("unsubscribe", cmd_unsubscribe))
+    app.add_handler(CommandHandler("approve",     cmd_approve))
+    app.add_handler(CommandHandler("deny",        cmd_deny))
+    app.add_handler(CommandHandler("pending",     cmd_pending))
     app.add_handler(CommandHandler("status",      cmd_status))
     app.add_handler(CommandHandler("runners",     cmd_runners))
     app.add_handler(CommandHandler("leaderboard", cmd_leaderboard))

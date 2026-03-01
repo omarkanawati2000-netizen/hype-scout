@@ -1,10 +1,8 @@
 """
 utils/dexscreener.py — DexScreener API wrapper
 """
-import json
-import time
-import urllib.request
 import logging
+import requests as req_lib
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +15,8 @@ def _fetch(mint: str) -> list:
     """Raw fetch of DexScreener pairs for a mint."""
     try:
         url = DEXSCREENER_URL.format(mint)
-        req = urllib.request.Request(url, headers={"User-Agent": "HypeScout/2.0"})
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            data = json.loads(resp.read())
-            return data.get("pairs") or []
+        resp = req_lib.get(url, headers={"User-Agent": "HypeScout/2.0"}, timeout=_TIMEOUT)
+        return resp.json().get("pairs") or []
     except Exception as e:
         logger.debug(f"DexScreener fetch error for {mint}: {e}")
         return []

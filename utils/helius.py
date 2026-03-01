@@ -3,7 +3,7 @@ utils/helius.py — Helius RPC wrapper for Solana holder counts
 """
 import json
 import logging
-import urllib.request
+import requests
 import sys
 import os
 
@@ -31,17 +31,12 @@ def get_holder_count(mint: str) -> int | None:
             "method": "getTokenLargestAccounts",
             "params": [mint],
         }
-        req = urllib.request.Request(
-            HELIUS_RPC_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            result = json.loads(resp.read())
-            if "result" in result and result["result"]:
-                accounts = result["result"].get("value", result["result"])
-                if isinstance(accounts, list):
-                    return len(accounts)
+        resp = requests.post(HELIUS_RPC_URL, json=payload, timeout=_TIMEOUT)
+        result = resp.json()
+        if "result" in result and result["result"]:
+            accounts = result["result"].get("value", result["result"])
+            if isinstance(accounts, list):
+                return len(accounts)
     except Exception as e:
         logger.debug(f"Helius RPC error for {mint}: {e}")
     return None

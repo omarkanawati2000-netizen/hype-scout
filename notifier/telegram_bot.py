@@ -79,25 +79,18 @@ class TelegramNotifier:
         self._base = f"https://api.telegram.org/bot{self.token}"
 
     def _send(self, chat_id: int | str, text: str, parse_mode: str = "HTML") -> bool:
-        import urllib.request, urllib.error
+        import requests as req_lib
         url = f"{self._base}/sendMessage"
-        payload = json.dumps({
-            "chat_id":    chat_id,
-            "text":       text[:4096],  # Telegram limit
-            "parse_mode": parse_mode,
-            "disable_web_page_preview": False,
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            url, data=payload,
-            headers={"Content-Type": "application/json"},
-        )
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                return resp.status == 200
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
-            logger.error(f"Telegram HTTP {e.code}: {body}")
-            return False
+            resp = req_lib.post(url, json={
+                "chat_id":    chat_id,
+                "text":       text[:4096],
+                "parse_mode": parse_mode,
+                "disable_web_page_preview": False,
+            }, timeout=10)
+            if not resp.ok:
+                logger.error(f"Telegram HTTP {resp.status_code}: {resp.text}")
+            return resp.ok
         except Exception as e:
             logger.error(f"Telegram send error: {e}")
             return False

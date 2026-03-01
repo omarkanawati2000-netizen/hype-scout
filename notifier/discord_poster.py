@@ -6,8 +6,7 @@ No subprocess shenanigans — pure urllib.
 """
 import json
 import logging
-import urllib.request
-import urllib.error
+import requests
 from pathlib import Path
 import sys
 
@@ -32,27 +31,16 @@ class DiscordPoster:
             return False
 
         url = DISCORD_API.format(channel_id)
-        # Discord max 2000 chars per message
         if len(content) > 1990:
             content = content[:1990] + "…"
-
-        payload = json.dumps({"content": content}).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=payload,
-            headers={
-                "Authorization": f"Bot {self.token}",
-                "Content-Type": "application/json",
-                "User-Agent": "HypeScout/2.0",
-            },
-        )
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                return resp.status in (200, 201)
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
-            logger.error(f"Discord HTTP {e.code}: {body}")
-            return False
+            resp = requests.post(url, json={"content": content}, headers={
+                "Authorization": f"Bot {self.token}",
+                "User-Agent": "HypeScout/2.0",
+            }, timeout=15)
+            if not resp.ok:
+                logger.error(f"Discord HTTP {resp.status_code}: {resp.text}")
+            return resp.ok
         except Exception as e:
             logger.error(f"Discord send error: {e}")
             return False

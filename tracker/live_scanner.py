@@ -33,7 +33,7 @@ from utils.dexscreener import get_live_mc_batch
 from utils.formatter import format_single_runner
 from utils.queue_utils import load_tracked, append_milestone
 
-SCAN_INTERVAL = 300  # 5 minutes
+SCAN_INTERVAL = 120  # 2 minutes
 
 
 def load_state() -> dict:

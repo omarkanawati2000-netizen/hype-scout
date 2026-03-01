@@ -286,24 +286,36 @@ async def run_bot():
         await update.message.reply_html(msg)
 
     async def cmd_leaderboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        coins = load_tracked(max_age_hours=24)
-        milestones = load_milestones()
+        from utils.dexscreener import get_live_mc
+        import time as _time
 
-        # Build peak multiplier map from milestones
+        await update.message.reply_text("🏆 Building leaderboard with live prices...")
+
+        coins = load_tracked(max_age_hours=24)
+
+        # Also pull peak tiers from live_scan_state (already-fired alerts)
         peak_map = {}
-        for m in milestones:
-            mint = m.get("mint", "")
-            mult = m.get("multiplier", 0)
-            if mint and mult > peak_map.get(mint, 0):
-                peak_map[mint] = mult
+        try:
+            import json as _json
+            from config import LIVE_SCAN_STATE
+            if LIVE_SCAN_STATE.exists():
+                scan_state = _json.loads(LIVE_SCAN_STATE.read_text(encoding="utf-8"))
+                for mint, alerts in scan_state.get("alerts", {}).items():
+                    fired_tiers = [float(k.replace("x", "")) for k in alerts.keys()]
+                    if fired_tiers:
+                        peak_map[mint] = max(fired_tiers)
+        except Exception:
+            pass
 
         leaderboard = []
         for mint, c in coins.items():
             entry_mc = c.get("entry_mc", 0)
             if entry_mc <= 0:
                 continue
-            current_mc = c.get("current_mc", 0)
-            live_mult = round(current_mc / entry_mc, 1) if current_mc else 0
+            # Fetch live MC from DexScreener
+            live = get_live_mc(mint)
+            current_mc = live["mc"] if live else 0
+            live_mult = round(current_mc / max(entry_mc, 1), 1) if current_mc > 0 else 0
             peak_mult = max(peak_map.get(mint, 0), live_mult)
             if peak_mult >= 2.0:
                 leaderboard.append({
@@ -316,6 +328,7 @@ async def run_bot():
                     "peak_mult":  peak_mult,
                     "age_str":    c.get("added_at", "")[:10],
                 })
+            _time.sleep(0.3)  # DexScreener rate limit
 
         if not leaderboard:
             await update.message.reply_text("No leaderboard data yet. Check back soon!")

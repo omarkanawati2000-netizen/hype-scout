@@ -161,7 +161,7 @@ class TelegramNotifier:
                 "chat_id":    chat_id,
                 "text":       text[:4096],
                 "parse_mode": parse_mode,
-                "disable_web_page_preview": False,
+                "disable_web_page_preview": True,
             }, timeout=10)
             if resp.ok:
                 return resp.json().get("result", {}).get("message_id")

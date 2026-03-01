@@ -130,6 +130,19 @@ def run_scan(state: dict) -> dict:
         if not live or live["mc"] <= 0:
             continue
 
+        # ── MC sanity check ───────────────────────────────────────────────────
+        # If multiple DEX sources disagree wildly on MC, the data is unreliable.
+        # Skip the alert to avoid posting garbage multipliers (e.g. 2596x when
+        # real move is 8x). The spread and source count are logged for debugging.
+        if not live.get("reliable", True):
+            sources = live.get("sources_checked", "?")
+            spread  = live.get("mc_spread", "?")
+            logger.warning(
+                f"Skipping {coin.get('name', mint)} — MC unreliable: "
+                f"{sources} sources, {spread}x spread across pairs"
+            )
+            continue
+
         current_mc = live["mc"]
         mult       = round(current_mc / max(entry_mc, 1), 1)
 

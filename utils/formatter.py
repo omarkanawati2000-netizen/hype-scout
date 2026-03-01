@@ -267,11 +267,13 @@ def format_leaderboard(coins: list, platform: str = "discord") -> str:
     if platform == "telegram":
         lines = [f"🏆 <b>PumpScanner Leaderboard</b> · Top {len(coins)} · {now}", "━━━━━━━━━━━━━━━━━━━━━━"]
         for i, c in enumerate(coins):
-            rank = medal[i] if i < 3 else f"#{i+1}"
+            rank  = medal[i] if i < 3 else f"#{i+1}"
             emoji = tier_emoji(c["peak_mult"])
+            mint  = c.get("mint", "")
+            link  = f'<a href="https://pump.fun/{mint}">Chart</a>' if mint else ""
             lines.append(
                 f"{rank} {emoji} <b>{c['name']}</b> — <b>{c['peak_mult']:.1f}x</b>\n"
-                f"    {fmt_usd(c['entry_mc'])} → {fmt_usd(c['peak_mc'])} | {c.get('age_str', '')}"
+                f"    {fmt_usd(c['entry_mc'])} → {fmt_usd(c['peak_mc'])} | {c.get('age_str', '')} {link}"
             )
     else:
         lines = [f"🏆 **PumpScanner Leaderboard** · Top {len(coins)} · {now}", "━━━━━━━━━━━━━━━━━━━━━━"]

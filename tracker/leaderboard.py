@@ -71,12 +71,30 @@ def main():
     live_data = get_live_mc_batch(mints)
 
     # Build peak multiplier from milestones (historical highs)
-    peak_map: dict = {}  # mint → peak_mult
+    # Also track recording count per mint for sanity cap
+    peak_map:   dict = {}   # mint → peak_mult
+    mult_list:  dict = {}   # mint → sorted list of all recorded mults
+
     for m in milestones:
         mint = m.get("mint", "")
         mult = m.get("multiplier", 0)
-        if mint and mult > peak_map.get(mint, 0):
+        if not mint:
+            continue
+        if mult > peak_map.get(mint, 0):
             peak_map[mint] = mult
+        mult_list.setdefault(mint, []).append(mult)
+
+    # Sanity cap: > 500x requires 3+ milestone recordings
+    # If fewer recordings, use the 2nd-highest confirmed mult instead
+    SANITY_CAP      = 500.0
+    MIN_RECORDINGS  = 3
+    for mint, peak in list(peak_map.items()):
+        if peak > SANITY_CAP:
+            recordings = sorted(mult_list.get(mint, []), reverse=True)
+            if len(recordings) < MIN_RECORDINGS:
+                # Not enough confirmation — use 2nd highest if available, else drop
+                fallback = recordings[1] if len(recordings) >= 2 else 0
+                peak_map[mint] = fallback
 
     # Build leaderboard entries
     leaderboard = []
@@ -85,12 +103,15 @@ def main():
         if entry_mc <= 0:
             continue
 
-        # Live current MC from DexScreener
-        live      = live_data.get(mint, {})
+        # Live current MC from DexScreener — only use if data is reliable
+        live       = live_data.get(mint, {})
         current_mc = live.get("mc", 0)
-        live_mult  = round(current_mc / entry_mc, 1) if current_mc > 0 else 0
+        reliable   = live.get("reliable", True)
+        if not reliable:
+            current_mc = 0  # discard bad MC data, fall back to milestone peak only
+        live_mult = round(current_mc / entry_mc, 1) if current_mc > 0 else 0
 
-        # Peak is max of all-time milestone high and current live
+        # Peak is max of all-time milestone high and current live (if reliable)
         peak_mult = max(peak_map.get(mint, 0), live_mult)
 
         if peak_mult < 2.0:

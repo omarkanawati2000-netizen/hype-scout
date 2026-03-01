@@ -338,45 +338,102 @@ async def run_bot():
         msg = format_leaderboard(leaderboard[:10], platform="telegram")
         await update.message.reply_html(msg)
 
-    async def cmd_subscribers(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Admin-only command — shows full subscriber list with names and join dates."""
+    async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Admin-only dashboard."""
         if TELEGRAM_ADMIN_IDS and update.effective_chat.id not in TELEGRAM_ADMIN_IDS:
             await update.message.reply_text("⛔ Admin only.")
             return
-        subs = get_subscriber_list()
-        if not subs:
-            await update.message.reply_text("No subscribers yet.")
-            return
 
-        lines = [f"👥 <b>Subscribers ({len(subs)} total)</b>\n"]
+        import json as _json
+        import os as _os
+
+        # ── Section: Subscribers ──────────────────────────────────────────────
+        subs = get_subscriber_list()
+        sub_lines = []
         for i, s in enumerate(subs, 1):
             name     = s.get("name", "Unknown")
             username = s.get("username", "")
             joined   = s.get("joined_at", "?")
-            chat_id  = s.get("chat_id", "?")
-            display  = f"{name}"
-            if username:
-                display += f" {username}"
-            lines.append(f"{i}. {display}\n   📅 {joined} · ID: <code>{chat_id}</code>")
+            display  = f"{name} {username}".strip()
+            sub_lines.append(f"  {i}. {display} · {joined}")
+        sub_block = "\n".join(sub_lines) if sub_lines else "  No subscribers yet"
 
-        # Split into chunks if too long
-        msg = "\n".join(lines)
+        # ── Section: Win Rate ─────────────────────────────────────────────────
+        coins = load_tracked(max_age_hours=24)
+        total_tracked = len(coins)
+        winners = 0
+        try:
+            from config import LIVE_SCAN_STATE
+            if LIVE_SCAN_STATE.exists():
+                scan_state = _json.loads(LIVE_SCAN_STATE.read_text(encoding="utf-8"))
+                winners = sum(1 for alerts in scan_state.get("alerts", {}).values() if alerts)
+        except Exception:
+            pass
+        win_rate = f"{(winners / total_tracked * 100):.1f}%" if total_tracked > 0 else "N/A"
+
+        # ── Section: Today's throughput ───────────────────────────────────────
+        total_posted = 0
+        queue_pending = 0
+        try:
+            from config import QUEUE_FILE
+            if QUEUE_FILE.exists():
+                lines = [l for l in QUEUE_FILE.read_text(encoding="utf-8").splitlines() if l.strip()]
+                total_posted  = sum(1 for l in lines if _json.loads(l).get("posted", False))
+                queue_pending = sum(1 for l in lines if not _json.loads(l).get("posted", True))
+        except Exception:
+            pass
+
+        # ── Section: System health ────────────────────────────────────────────
+        from config import POLLER_LOCK, POSTER_LOCK
+        def check_lock(lock_path):
+            try:
+                pid = int(lock_path.read_text().strip())
+                _os.kill(pid, 0)
+                return f"✅ alive (PID {pid})"
+            except Exception:
+                return "❌ down"
+
+        scanner_status = check_lock(POLLER_LOCK)
+        poster_status  = check_lock(POSTER_LOCK)
+        tg_status      = "✅ alive (this process)"
+
+        # ── Build message ─────────────────────────────────────────────────────
+        msg = (
+            f"🔐 <b>ADMIN PANEL</b> · {datetime.now().strftime('%Y-%m-%d %H:%M')} MST\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+            f"👥 <b>Subscribers ({len(subs)})</b>\n"
+            f"{sub_block}\n\n"
+
+            f"📊 <b>Win Rate (24h)</b>\n"
+            f"  Tracked: <b>{total_tracked}</b> coins\n"
+            f"  Hit 2x+: <b>{winners}</b> coins\n"
+            f"  Rate: <b>{win_rate}</b>\n\n"
+
+            f"📥 <b>Throughput</b>\n"
+            f"  Posted today: <b>{total_posted}</b>\n"
+            f"  Queue pending: <b>{queue_pending}</b>\n\n"
+
+            f"🖥 <b>System Health</b>\n"
+            f"  Scanner: {scanner_status}\n"
+            f"  Poster:  {poster_status}\n"
+            f"  TG Bot:  {tg_status}\n"
+        )
+
         if len(msg) > 4000:
-            msg = msg[:4000] + "\n…(truncated)"
+            msg = msg[:3990] + "\n…(truncated)"
         await update.message.reply_html(msg)
 
     async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_html(
             "🤖 <b>Hype Scout Commands</b>\n\n"
-            "/start — Welcome message\n"
             "/subscribe — Get real-time token alerts\n"
             "/unsubscribe — Stop receiving alerts\n"
-            "/status — Scanner stats &amp; subscriber count\n"
-            "/runners — Show active coins at 2x+\n"
-            "/leaderboard — Top 10 performers today\n"
-            "/subscribers — View full subscriber list (admin)\n"
+            "/status — Scanner stats\n"
+            "/runners — Active coins at 2x+ (live)\n"
+            "/leaderboard — Top 10 performers today (live)\n"
             "/help — This message\n\n"
-            "📡 Scanning Pump.fun every 30 seconds for the next moonshot."
+            "📡 Scanning Pump.fun every 30 seconds."
         )
 
     # ── Build and run app ─────────────────────────────────────────────────────
@@ -387,7 +444,7 @@ async def run_bot():
     app.add_handler(CommandHandler("status",      cmd_status))
     app.add_handler(CommandHandler("runners",     cmd_runners))
     app.add_handler(CommandHandler("leaderboard", cmd_leaderboard))
-    app.add_handler(CommandHandler("subscribers", cmd_subscribers))
+    app.add_handler(CommandHandler("admin",       cmd_admin))
     app.add_handler(CommandHandler("help",        cmd_help))
 
     return app

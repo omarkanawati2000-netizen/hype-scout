@@ -24,7 +24,7 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import TELEGRAM_BOT_TOKEN, SUBSCRIBERS_FILE, TRACKED_FILE, QUEUE_FILE
+from config import TELEGRAM_BOT_TOKEN, SUBSCRIBERS_FILE, TRACKED_FILE, QUEUE_FILE, TELEGRAM_ADMIN_IDS
 from utils.formatter import format_telegram_alert, format_runner_msg, format_leaderboard, fmt_usd, tier_emoji
 from utils.queue_utils import load_tracked, load_milestones
 
@@ -293,7 +293,10 @@ async def run_bot():
         await update.message.reply_html(msg)
 
     async def cmd_subscribers(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Admin command — shows full subscriber list with names and join dates."""
+        """Admin-only command — shows full subscriber list with names and join dates."""
+        if TELEGRAM_ADMIN_IDS and update.effective_chat.id not in TELEGRAM_ADMIN_IDS:
+            await update.message.reply_text("⛔ Admin only.")
+            return
         subs = get_subscriber_list()
         if not subs:
             await update.message.reply_text("No subscribers yet.")

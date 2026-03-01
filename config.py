@@ -28,7 +28,8 @@ DISCORD_EARLY_TRENDING_CHANNEL = os.getenv("DISCORD_EARLY_TRENDING_CHANNEL", "14
 DISCORD_RUNNERS_CHANNEL        = os.getenv("DISCORD_RUNNERS_CHANNEL", "1477453762959249559")
 
 # ── Telegram (optional) ────────────────────────────────────────────────────────
-TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "")  # Optional: one-way channel
+TELEGRAM_CHANNEL_ID   = os.getenv("TELEGRAM_CHANNEL_ID", "")
+TELEGRAM_ADMIN_IDS    = [int(x) for x in os.getenv("TELEGRAM_ADMIN_CHAT_ID", "").split(",") if x.strip()]
 
 # ── Scanner Thresholds ─────────────────────────────────────────────────────────
 MC_MIN_USD      = float(os.getenv("MC_MIN_USD", "5000"))

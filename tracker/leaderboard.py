@@ -2,7 +2,8 @@
 """
 tracker/leaderboard.py — Hourly leaderboard (cron: every 1 hour)
 
-Top 15 coins by peak multiplier in last 24h.
+Top 15 coins by peak multiplier in last 24h. Uses live DexScreener data
+via batch fetch for accurate current multipliers.
 Medal rankings: 🥇🥈🥉, tier emojis: 🚀⚡🔥💥
 
 Output:
@@ -22,7 +23,8 @@ if sys.platform == "win32":
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import LEADERBOARD_STATE, TRACK_MAX_AGE_HOURS
-from utils.formatter import format_leaderboard, fmt_usd, tier_emoji
+from utils.formatter import format_leaderboard
+from utils.dexscreener import get_live_mc_batch
 from utils.queue_utils import load_tracked, load_milestones
 
 LEADERBOARD_INTERVAL = 3600  # 1 hour
@@ -58,7 +60,17 @@ def main():
     coins      = load_tracked(max_age_hours=TRACK_MAX_AGE_HOURS)
     milestones = load_milestones()
 
-    # Build peak multiplier from milestones
+    if not coins:
+        state["last_posted"] = now
+        save_state(state)
+        print("SKIP|No tracked coins")
+        return
+
+    # ── Live batch fetch from DexScreener ──────────────────────────────
+    mints     = list(coins.keys())
+    live_data = get_live_mc_batch(mints)
+
+    # Build peak multiplier from milestones (historical highs)
     peak_map: dict = {}  # mint → peak_mult
     for m in milestones:
         mint = m.get("mint", "")
@@ -72,21 +84,28 @@ def main():
         entry_mc = c.get("entry_mc", 0)
         if entry_mc <= 0:
             continue
-        current_mc = c.get("current_mc", 0)
+
+        # Live current MC from DexScreener
+        live      = live_data.get(mint, {})
+        current_mc = live.get("mc", 0)
         live_mult  = round(current_mc / entry_mc, 1) if current_mc > 0 else 0
-        peak_mult  = max(peak_map.get(mint, 0), live_mult)
+
+        # Peak is max of all-time milestone high and current live
+        peak_mult = max(peak_map.get(mint, 0), live_mult)
+
         if peak_mult < 2.0:
             continue
+
         peak_mc = max(current_mc, entry_mc * peak_mult)
         leaderboard.append({
-            "mint":      mint,
-            "name":      c.get("name", "?"),
-            "symbol":    c.get("symbol", "?"),
-            "entry_mc":  entry_mc,
+            "mint":       mint,
+            "name":       c.get("name", "?"),
+            "symbol":     c.get("symbol", "?"),
+            "entry_mc":   entry_mc,
             "current_mc": current_mc,
-            "peak_mc":   peak_mc,
-            "peak_mult": peak_mult,
-            "age_str":   c.get("added_at", "")[:10],
+            "peak_mc":    peak_mc,
+            "peak_mult":  peak_mult,
+            "age_str":    c.get("added_at", "")[:10],
         })
 
     if not leaderboard:
@@ -108,15 +127,15 @@ def main():
     try:
         from notifier.discord_poster import DiscordPoster
         DiscordPoster().post_runner(discord_msg)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Discord error: {e}", file=sys.stderr)
     try:
         from notifier.telegram_bot import TelegramNotifier
         TelegramNotifier().broadcast_text(telegram_msg)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Telegram error: {e}", file=sys.stderr)
 
-    print(f"LEADERBOARD|{discord_msg}")
+    print(f"LEADERBOARD|{len(top)} entries posted")
 
 
 if __name__ == "__main__":

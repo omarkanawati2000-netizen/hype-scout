@@ -2,13 +2,15 @@
 """
 tracker/live_scanner.py — Live runner scanner (cron: every 5 min)
 
-Fetches live MC from DexScreener for all tracked coins (last 24h).
+Fetches live MC from DexScreener for all tracked coins (last 24h) using
+batch API calls (up to 29 mints per request) for speed.
+
 Alerts coins currently at 2x+ vs entry MC, with 30-min cooldown per tier.
 
 Output:
-    LIVE|<message>   → post to #early-trending-runners + Telegram subscribers
-    QUIET            → nothing running, do nothing
-    SKIP|<reason>    → cooldown not elapsed
+    LIVE|<n> runners   → posted to #early-trending-runners + Telegram
+    QUIET              → no runners found
+    SKIP|<reason>      → interval not elapsed
 """
 import json
 import os
@@ -27,7 +29,7 @@ from config import (
     LIVE_SCAN_STATE, TIER_COOLDOWN_MIN, PUMP_THRESHOLDS,
     TRACK_MAX_AGE_HOURS,
 )
-from utils.dexscreener import get_live_mc
+from utils.dexscreener import get_live_mc_batch
 from utils.formatter import format_runner_msg
 from utils.queue_utils import load_tracked
 
@@ -72,23 +74,29 @@ def main():
         print(f"SKIP|Next scan in {remaining}m")
         return
 
+    # Mark scan started (so concurrent runs know we're running)
+    state["last_scan"] = now
+    save_state(state)
+
     coins = load_tracked(max_age_hours=TRACK_MAX_AGE_HOURS)
     if not coins:
-        state["last_scan"] = now
-        save_state(state)
         print("QUIET")
         return
 
-    alerts_state    = state.get("alerts", {})
-    new_alerts      = dict(alerts_state)
-    runners         = []
+    # ── Batch DexScreener fetch (29 mints per request) ──────────────────
+    mints     = list(coins.keys())
+    live_data = get_live_mc_batch(mints)
+
+    alerts_state = state.get("alerts", {})
+    new_alerts   = dict(alerts_state)
+    runners      = []
 
     for mint, coin in coins.items():
         entry_mc = coin.get("entry_mc", 0)
         if entry_mc <= 0:
             continue
 
-        live = get_live_mc(mint)
+        live = live_data.get(mint)
         if not live or live["mc"] <= 0:
             continue
 
@@ -120,15 +128,14 @@ def main():
             "sells_h1":   live["sells_h1"],
         })
 
-        time.sleep(0.4)  # DexScreener rate limit
-
     runners.sort(key=lambda x: -x["mult"])
-    state["last_scan"] = now
-    state["alerts"]    = new_alerts
+
+    # Save updated alert timestamps
+    state["alerts"] = new_alerts
     save_state(state)
 
     if not runners:
-        print("QUIET")
+        print(f"QUIET|Scanned {len(mints)} coins, 0 runners")
         return
 
     discord_msg  = format_runner_msg(runners, platform="discord")
@@ -139,16 +146,17 @@ def main():
         from notifier.discord_poster import DiscordPoster
         DiscordPoster().post_runner(discord_msg)
     except Exception as e:
-        pass
+        print(f"Discord post error: {e}", file=sys.stderr)
 
     # Broadcast to all Telegram subscribers
     try:
         from notifier.telegram_bot import TelegramNotifier
         TelegramNotifier().broadcast_text(telegram_msg)
     except Exception as e:
-        pass
+        print(f"Telegram broadcast error: {e}", file=sys.stderr)
 
-    print(f"LIVE|{discord_msg}")
+    summary = ", ".join(f"{r['name']} {r['mult']}x" for r in runners[:5])
+    print(f"LIVE|{len(runners)} runners: {summary}")
 
 
 if __name__ == "__main__":

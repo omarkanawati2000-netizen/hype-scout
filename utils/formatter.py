@@ -157,12 +157,13 @@ def format_telegram_alert(d: dict) -> str:
 
 # ── Single Runner Alert (new format) ──────────────────────────────────────────
 
-def _money_bags(thresh: float) -> str:
-    """Scale 💸 emoji count with tier: 2x→4, 3x→6, 5x→8, 10x→12, 20x→16."""
-    tiers = {2: 4, 3: 6, 5: 8, 10: 12, 20: 16}
-    count = tiers.get(int(thresh), max(4, int(thresh) * 2))
-    count = min(count, 16)
-    return "💸" * count
+def _money_bags(mult: float) -> str:
+    """Scale 💸 emoji count with actual multiplier."""
+    if mult >= 20: return "💸" * 16
+    if mult >= 10: return "💸" * 12
+    if mult >= 5:  return "💸" * 8
+    if mult >= 3:  return "💸" * 6
+    return "💸" * 4
 
 
 def format_single_runner(r: dict, platform: str = "discord") -> str:
@@ -185,16 +186,16 @@ def format_single_runner(r: dict, platform: str = "discord") -> str:
     current_mc = r.get("current_mc", 0)
     mint       = r.get("mint", "")
 
-    # Show threshold tier as the headline (clean: 2X, 3X, 5X, 10X, 20X)
-    thresh_int = int(thresh)
-    bags       = _money_bags(thresh)
-    mc_arrow   = f"{fmt_usd(entry_mc)} —> {fmt_usd(current_mc)}"
+    # Show actual current multiplier (rounded to 1 decimal)
+    mult_display = f"{mult:.1f}".rstrip('0').rstrip('.')
+    bags         = _money_bags(mult)
+    mc_arrow     = f"{fmt_usd(entry_mc)} —> {fmt_usd(current_mc)}"
     dex_url    = f"https://dexscreener.com/solana/{mint}"
     pump_url   = f"https://pump.fun/{mint}"
 
     if platform == "telegram":
         return (
-            f"📈 <b>{name}</b> is up <b>{thresh_int}X</b> 📈\n"
+            f"📈 <b>{name}</b> is up <b>{mult_display}X</b> 📈\n"
             f"from ⚡ Entry Signal\n"
             f"\n"
             f"{mc_arrow} 💵\n"
@@ -207,7 +208,7 @@ def format_single_runner(r: dict, platform: str = "discord") -> str:
         )
     else:  # discord
         return (
-            f"📈 **{name}** is up **{thresh_int}X** 📈\n"
+            f"📈 **{name}** is up **{mult_display}X** 📈\n"
             f"from ⚡ Entry Signal\n"
             f"\n"
             f"{mc_arrow} 💵\n"

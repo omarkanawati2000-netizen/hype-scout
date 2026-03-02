@@ -68,8 +68,6 @@ def format_discord_alert(d: dict) -> str:
     else:
         links = f"[Chart]({dex_url}) • [Pump]({pump_url})"
 
-    bar = bc_bar(bc_pct)
-
     holder_line = ""
     if holders:
         holder_line = f"👥 Hodls: **{holders}** {holder_badge(holders)}\n"
@@ -89,7 +87,7 @@ def format_discord_alert(d: dict) -> str:
         f"💧 Liq: {fmt_usd(liq)}\n"
         f"{vol_line}"
         f"{holder_line}"
-        f"🧪 BC: {bar} {bc_pct:.0f}%\n"
+        f"🧪 BC: {bc_pct:.0f}%\n"
         f"👨‍💻 Dev: 0.0 SOL | 0.0% ${symbol}\n\n"
         f"`{mint}`\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -127,8 +125,6 @@ def format_telegram_alert(d: dict) -> str:
     links_parts.append(f'<a href="{pump_url}">Pump</a>')
     links = " • ".join(links_parts)
 
-    bar = bc_bar(bc_pct)
-
     holder_line = ""
     if holders:
         holder_line = f"👥 Hodls: <b>{holders}</b> {holder_badge(holders)}\n"
@@ -148,7 +144,7 @@ def format_telegram_alert(d: dict) -> str:
         f"💧 Liq: {fmt_usd(liq)}\n"
         f"{vol_line}"
         f"{holder_line}"
-        f"🧪 BC: {bar} {bc_pct:.0f}%\n"
+        f"🧪 BC: {bc_pct:.0f}%\n"
         f"👨‍💻 Dev: 0.0 SOL | 0.0% ${symbol}\n\n"
         f"<code>{mint}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━"

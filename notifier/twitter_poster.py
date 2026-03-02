@@ -1,7 +1,7 @@
 """
 notifier/twitter_poster.py — Auto-tweet runner alerts to @PumpScannerTool
 
-Milestones (fires once per coin, first crossing only): 3x / 5x / 10x / 25x / 100x
+Milestones (fires once per coin per tier): 3x / 5x / 10x / 15x / 20x / 25x / 50x / 100x
 
 Recap schedule:
   - Every 3h  → top 3 runners from past 3h
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # ── Config ─────────────────────────────────────────────────────────────────────
 TWITTER_DEMO_MODE = False  # True = Discord preview, False = real tweets
 
-THRESHOLDS = [3.0, 5.0, 10.0, 25.0, 100.0]  # milestone tweet triggers
+THRESHOLDS = [3.0, 5.0, 10.0, 15.0, 20.0, 25.0, 50.0, 100.0]  # milestone tweet triggers
 
 RECAP_3H_INTERVAL  = 3 * 3600   # 3 hours
 RECAP_12H_INTERVAL = 12 * 3600  # 12 hours
@@ -102,10 +102,25 @@ _TEMPLATES = {
         "10X on ${ticker} 🤯\n\nscanner flagged it at {entry_mc} before anyone was talking about it",
         "🚨 ${ticker} is running hard — just hit 10X\n\nfrom a {entry_mc} entry. PumpScanner had this\n\nfree alerts → link in bio $sol",
     ],
+    15.0: [
+        "${ticker} just crossed 15X 👀\n\nPumpScanner had this at {entry_mc}. now {current_mc}\n\nstill going",
+        "15X on ${ticker} 🚀\n\nflagged at {entry_mc} entry. this is what early looks like",
+        "🔥 ${ticker} up 15X from the scanner entry signal\n\n{entry_mc} → {current_mc}\n\ncatch the next one → link in bio",
+    ],
+    20.0: [
+        "${ticker} just hit 20X 💀\n\ncaught at {entry_mc} — now {current_mc}\n\nPumpScanner called it",
+        "20X. ${ticker}. scanner entry was {entry_mc} 🤯\n\nthese are the ones that matter",
+        "🚨 ${ticker} up 20X from the PumpScanner signal\n\n{entry_mc} → {current_mc}\n\nfree alerts → link in bio $sol",
+    ],
     25.0: [
         "${ticker} just went 25X 💀\n\ncaught at {entry_mc} by PumpScanner. now sitting at {current_mc}",
         "25X on ${ticker}. not a typo 🚀\n\n{entry_mc} → {current_mc}\n\nalerts went out at entry",
         "🔥 ${ticker} up 25X from the PumpScanner entry signal\n\nthis is why we scan pump.fun 24/7\n\nlink in bio $sol",
+    ],
+    50.0: [
+        "${ticker} is a 50X runner 🏆\n\nPumpScanner flagged it at {entry_mc}\n\n{entry_mc} → {current_mc}. insane",
+        "50X on ${ticker} 💀\n\nscanner caught this at {entry_mc} before the crowd\n\nfree alerts → link in bio",
+        "🚨 ${ticker} just crossed 50X\n\n{entry_mc} entry → {current_mc} now\n\nPumpScanner $sol",
     ],
     100.0: [
         "${ticker} just hit 100X 🏆\n\n{entry_mc} → {current_mc}. PumpScanner flagged this at entry",

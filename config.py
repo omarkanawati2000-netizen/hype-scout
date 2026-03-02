@@ -68,6 +68,7 @@ LIVE_SCAN_STATE  = DATA_DIR / "live_scan_state.json"
 LEADERBOARD_STATE = DATA_DIR / "leaderboard_state.json"
 POLLER_LOCK      = DATA_DIR / "poller.lock"
 POSTER_LOCK      = DATA_DIR / "poster.lock"
+SCAN_LOG_FILE    = DATA_DIR / "scan_log.jsonl"
 
 # ── Pump.fun API ───────────────────────────────────────────────────────────────
 PUMP_API_BASE    = "https://frontend-api-v3.pump.fun"

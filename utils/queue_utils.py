@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent))
-from config import QUEUE_FILE, TRACKED_FILE, SEEN_MINTS_FILE, MILESTONES_FILE
+from config import QUEUE_FILE, TRACKED_FILE, SEEN_MINTS_FILE, MILESTONES_FILE, SCAN_LOG_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -191,3 +191,21 @@ def load_milestones(max_age_hours: int = 0) -> list:
     except Exception as e:
         logger.warning(f"Milestones load error: {e}")
     return entries
+
+
+# ── Scan log (scan_log.jsonl) ──────────────────────────────────────────────────
+
+def append_to_scan_log(entry: dict):
+    """
+    Append a scan candidate to scan_log.jsonl for backtesting.
+    Every token that passes basic MC/BC/liq/holder filters is logged here,
+    whether it ultimately passed or was rejected by quality filters.
+    Required fields: mint, filter_passed (bool), filter_reject_reason (str|None).
+    All other computed fields (dev_pct, bs_ratio, buys_h1, sells_h1, etc.) should
+    be included so we can correlate filter values with runner outcomes later.
+    """
+    try:
+        with open(SCAN_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        logger.error(f"Scan log append error: {e}")

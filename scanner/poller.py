@@ -32,7 +32,7 @@ from config import (
 )
 from utils.dexscreener import get_volume
 from utils.helius import get_holder_count, get_dev_holding_pct
-from utils.queue_utils import append_to_queue, append_seen_mint, load_seen_mints
+from utils.queue_utils import append_to_queue, append_seen_mint, load_seen_mints, append_to_scan_log
 
 # ── Filter thresholds ─────────────────────────────────────────────────────────
 MAX_DEV_PCT = 10.0  # skip if creator holds > 10% of supply
@@ -113,70 +113,83 @@ async def fetch_recent_tokens() -> list:
 
 async def analyze_token(token: dict) -> dict | None:
     try:
-        mint       = token.get("mint")
-        name       = token.get("name", "Unknown")
-        symbol     = token.get("symbol", "???")
-        mc         = token.get("usd_market_cap", 0)
-        real_sol   = token.get("real_sol_reserves", 0)
-        virt_sol   = token.get("virtual_sol_reserves", real_sol + 1)
-        bc_pct     = (real_sol / virt_sol * 100) if virt_sol > 0 else 0
-        created_ms = token.get("created_timestamp", 0)
+        mint        = token.get("mint")
+        name        = token.get("name", "Unknown")
+        symbol      = token.get("symbol", "???")
+        mc          = token.get("usd_market_cap", 0)
+        real_sol    = token.get("real_sol_reserves", 0)
+        virt_sol    = token.get("virtual_sol_reserves", real_sol + 1)
+        bc_pct      = (real_sol / virt_sol * 100) if virt_sol > 0 else 0
+        created_ms  = token.get("created_timestamp", 0)
         age_minutes = ((datetime.now().timestamp() * 1000) - created_ms) / 60000
 
-        # Apply filters
+        # ── Basic pass-through filters (no logging — too noisy) ───────────────
         if not (MC_MIN_USD <= mc <= MC_MAX_USD):
             return None
         if bc_pct >= BC_MAX_PCT:
             return None
-        if real_sol < (MIN_SOL_LIQ * 1e9):  # convert SOL to lamports
+        if real_sol < (MIN_SOL_LIQ * 1e9):
             return None
 
-        # Holder check (rug protection)
+        # Holder check
         holder_count = get_holder_count(mint)
         if holder_count is not None and holder_count < MIN_HOLDERS:
             logger.debug(f"Filtered {name}: only {holder_count} holders")
             return None
 
-        # Volume data
+        # ── Gather all data for quality filters + scan log ────────────────────
         vol_data = get_volume(mint)
+        buys     = vol_data.get("buys_h1", 0) or 0
+        sells    = vol_data.get("sells_h1", 0) or 0
+        bs_ratio = round(buys / sells, 2) if sells > 0 else None
 
-        # ── Dev wallet holding filter ─────────────────────────────────────────
-        # Check if the creator is holding a large chunk of supply (rug setup)
-        creator = token.get("creator", "")
-        if creator:
-            dev_pct = get_dev_holding_pct(mint, creator)
-            if dev_pct is not None and dev_pct > MAX_DEV_PCT:
-                logger.info(f"Filtered {name}: dev holds {dev_pct:.1f}% of supply (max {MAX_DEV_PCT}%)")
-                return None
+        creator  = token.get("creator", "")
+        dev_pct  = get_dev_holding_pct(mint, creator) if creator else None
 
-        # Compute derived fields
-        liq_usd = (real_sol / 1e9) * 200  # estimate: 1 SOL ≈ $200
-        ath     = token.get("ath_market_cap", mc)
+        liq_usd  = (real_sol / 1e9) * 200
+        ath      = token.get("ath_market_cap", mc)
+        now_ts   = datetime.now().timestamp()
+
+        # ── Shared candidate dict (scan_log fields) ───────────────────────────
+        candidate = {
+            "mint":                   mint,
+            "name":                   name,
+            "symbol":                 symbol,
+            "market_cap":             mc,
+            "ath_market_cap":         ath,
+            "liquidity_usd":          liq_usd,
+            "age_minutes":            round(age_minutes, 2),
+            "bonding_curve_progress": round(bc_pct, 2),
+            "holder_count":           holder_count,
+            "real_sol_reserves":      real_sol,
+            "vol_h1":                 vol_data.get("vol_h1"),
+            "vol_m5":                 vol_data.get("vol_m5"),
+            "buys_h1":                buys,
+            "sells_h1":               sells,
+            "bs_ratio":               bs_ratio,
+            "dev_pct":                round(dev_pct, 2) if dev_pct is not None else None,
+            "created_at":             token.get("created_timestamp"),
+            "creator":                creator,
+            "twitter":                token.get("twitter"),
+            "timestamp":              now_ts,
+        }
+
+        # ── Quality filter: dev wallet ────────────────────────────────────────
+        if dev_pct is not None and dev_pct > MAX_DEV_PCT:
+            logger.info(f"Filtered {name}: dev holds {dev_pct:.1f}% (max {MAX_DEV_PCT}%)")
+            append_to_scan_log({**candidate, "filter_passed": False, "filter_reject_reason": f"dev_pct:{dev_pct:.1f}"})
+            return None
+
+        # ── Passed all filters ────────────────────────────────────────────────
+        append_to_scan_log({**candidate, "filter_passed": True, "filter_reject_reason": None})
 
         return {
-            "mint":                    mint,
-            "name":                    name,
-            "symbol":                  symbol,
-            "market_cap":              mc,
-            "ath_market_cap":          ath,
-            "liquidity_usd":           liq_usd,
-            "age_minutes":             age_minutes,
-            "bonding_curve_progress":  bc_pct,
-            "holder_count":            holder_count,
-            "real_sol_reserves":       real_sol,
-            "vol_h1":                  vol_data["vol_h1"],
-            "vol_m5":                  vol_data["vol_m5"],
-            "buys_h1":                 vol_data["buys_h1"],
-            "sells_h1":                vol_data["sells_h1"],
-            "created_at":              token.get("created_timestamp"),
-            "creator":                 token.get("creator", ""),
-            "twitter":                 token.get("twitter"),
-            "dexscreener_url":         f"https://dexscreener.com/solana/{mint}",
-            "pump_url":                f"https://pump.fun/{mint}",
-            "tier":                    "early",
-            "posted":                  False,
-            "timestamp":               datetime.now().timestamp(),
-            "source":                  "pump_poller_v2",
+            **candidate,
+            "dexscreener_url": f"https://dexscreener.com/solana/{mint}",
+            "pump_url":        f"https://pump.fun/{mint}",
+            "tier":            "early",
+            "posted":          False,
+            "source":          "pump_poller_v2",
         }
     except Exception as e:
         logger.debug(f"Analysis error: {e}")

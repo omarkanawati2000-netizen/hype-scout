@@ -35,9 +35,7 @@ from utils.helius import get_holder_count, get_dev_holding_pct
 from utils.queue_utils import append_to_queue, append_seen_mint, load_seen_mints
 
 # ── Filter thresholds ─────────────────────────────────────────────────────────
-MAX_DEV_PCT        = 10.0  # skip if creator holds > 10% of supply
-MAX_BUY_SELL_RATIO = 5.0   # skip if buys:sells > 5:1 (only for tokens > 10 min old)
-MIN_AGE_FOR_BS_CHECK = 10  # minutes — don't apply buy/sell filter to brand new tokens
+MAX_DEV_PCT = 10.0  # skip if creator holds > 10% of supply
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -139,22 +137,8 @@ async def analyze_token(token: dict) -> dict | None:
             logger.debug(f"Filtered {name}: only {holder_count} holders")
             return None
 
-        # Volume data (needed for buy/sell ratio check)
+        # Volume data
         vol_data = get_volume(mint)
-
-        # ── Buy/sell ratio filter ─────────────────────────────────────────────
-        # Skip tokens >10 min old with extremely lopsided buy pressure (fake demand)
-        buys  = vol_data.get("buys_h1", 0) or 0
-        sells = vol_data.get("sells_h1", 0) or 0
-        if age_minutes > MIN_AGE_FOR_BS_CHECK and sells > 0:
-            ratio = buys / sells
-            if ratio > MAX_BUY_SELL_RATIO:
-                logger.info(f"Filtered {name}: buy/sell ratio {ratio:.1f}:1 (max {MAX_BUY_SELL_RATIO}:1)")
-                return None
-        elif age_minutes > MIN_AGE_FOR_BS_CHECK and sells == 0 and buys > 20:
-            # 20+ buys, zero sells after 10 min = coordinated pump
-            logger.info(f"Filtered {name}: {buys} buys, 0 sells after {age_minutes:.0f}min")
-            return None
 
         # ── Dev wallet holding filter ─────────────────────────────────────────
         # Check if the creator is holding a large chunk of supply (rug setup)

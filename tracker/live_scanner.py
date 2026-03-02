@@ -117,9 +117,10 @@ def run_scan(state: dict) -> dict:
     mints     = list(coins.keys())
     live_data = get_live_mc_batch(mints)
 
-    alerts_state = state.get("alerts", {})
-    new_alerts   = dict(alerts_state)
-    runners      = []
+    alerts_state      = state.get("alerts", {})
+    new_alerts        = dict(alerts_state)
+    runners           = []
+    twitter_candidates = []  # ALL coins above 2x — for milestone-only sweep
 
     for mint, coin in coins.items():
         entry_mc = coin.get("entry_mc", 0)
@@ -148,6 +149,16 @@ def run_scan(state: dict) -> dict:
 
         if mult < 2.0:
             continue
+
+        # Collect for Twitter milestone sweep — independent of alert throttle
+        twitter_candidates.append({
+            "mint":       mint,
+            "name":       coin.get("name", coin.get("symbol", "?")),
+            "symbol":     coin.get("symbol", "?"),
+            "mult":       mult,
+            "entry_mc":   entry_mc,
+            "current_mc": current_mc,
+        })
 
         coin_state = new_alerts.get(mint, {})
 
@@ -191,6 +202,24 @@ def run_scan(state: dict) -> dict:
     state["alerts"]    = new_alerts
     save_state(state)
 
+    # ── Twitter milestone sweep (runs even with 0 Discord/TG runners) ──────────
+    if twitter_candidates:
+        try:
+            from notifier.twitter_poster import TwitterPoster
+            twitter_sweep = TwitterPoster()
+            for candidate in twitter_candidates:
+                try:
+                    twitter_sweep.post_runner(candidate)
+                except Exception as e:
+                    logger.error(f"Twitter milestone sweep ({candidate.get('name')}): {e}")
+                time.sleep(0.3)
+            # Recap check
+            from utils.queue_utils import load_milestones
+            recent = load_milestones(max_age_hours=12)
+            twitter_sweep.maybe_post_recap(recent)
+        except Exception as e:
+            logger.error(f"Twitter sweep init error: {e}")
+
     if not runners:
         logger.info(f"Scanned {len(mints)} coins — 0 new runners")
         return state
@@ -214,13 +243,6 @@ def run_scan(state: dict) -> dict:
         logger.error(f"Telegram init: {e}")
         telegram = None
 
-    try:
-        from notifier.twitter_poster import TwitterPoster
-        twitter = TwitterPoster()
-    except Exception as e:
-        logger.error(f"Twitter init: {e}")
-        twitter = None
-
     for r in runners:
         discord_msg  = format_single_runner(r, platform="discord")
         telegram_msg = format_single_runner(r, platform="telegram")
@@ -237,22 +259,7 @@ def run_scan(state: dict) -> dict:
             except Exception as e:
                 logger.error(f"Telegram post ({r['name']}): {e}")
 
-        if twitter:
-            try:
-                twitter.post_runner(r)
-            except Exception as e:
-                logger.error(f"Twitter post ({r['name']}): {e}")
-
         time.sleep(0.5)  # brief gap between individual posts
-
-    # ── Recap tweets (3h / 12h) ───────────────────────────────────────────────
-    if twitter:
-        try:
-            from utils.queue_utils import load_milestones
-            recent = load_milestones(max_age_hours=12)
-            twitter.maybe_post_recap(recent)
-        except Exception as e:
-            logger.error(f"Recap tweet error: {e}")
 
     return state
 

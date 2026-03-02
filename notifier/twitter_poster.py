@@ -275,6 +275,18 @@ class TwitterPoster:
 
         return ok
 
+    @staticmethod
+    def _dedup_runners(runners: list) -> list:
+        """Keep only the peak multiplier entry per coin, sorted highest first."""
+        best: dict = {}
+        for r in runners:
+            mint = r.get("mint", r.get("symbol", ""))
+            if not mint:
+                continue
+            if mint not in best or r.get("mult", 0) > best[mint].get("mult", 0):
+                best[mint] = r
+        return sorted(best.values(), key=lambda x: -x.get("mult", 0))
+
     def maybe_post_recap(self, recent_runners: list):
         """Post 3h or 12h recap if it's time. Pass recent runners sorted by mult desc."""
         if not self._ready or not recent_runners:
@@ -285,9 +297,9 @@ class TwitterPoster:
 
         # 3h recap
         if now - state.get("last_3h_recap", 0) >= RECAP_3H_INTERVAL:
-            runners_3h = [r for r in recent_runners if now - r.get("timestamp", 0) <= RECAP_3H_INTERVAL]
-            runners_3h.sort(key=lambda x: -x.get("mult", 0))
-            if len(runners_3h) >= 2:  # need at least 2 to make a decent recap
+            raw_3h     = [r for r in recent_runners if now - r.get("timestamp", 0) <= RECAP_3H_INTERVAL]
+            runners_3h = self._dedup_runners(raw_3h)
+            if len(runners_3h) >= 2:  # need at least 2 distinct coins
                 text = format_3h_recap(runners_3h)
                 if self._tweet(text, "3H RECAP"):
                     state["last_3h_recap"] = now
@@ -295,9 +307,9 @@ class TwitterPoster:
 
         # 12h recap
         if now - state.get("last_12h_recap", 0) >= RECAP_12H_INTERVAL:
-            runners_12h = [r for r in recent_runners if now - r.get("timestamp", 0) <= RECAP_12H_INTERVAL]
-            runners_12h.sort(key=lambda x: -x.get("mult", 0))
-            if len(runners_12h) >= 5:  # need at least 5 for a meaningful 12h recap
+            raw_12h     = [r for r in recent_runners if now - r.get("timestamp", 0) <= RECAP_12H_INTERVAL]
+            runners_12h = self._dedup_runners(raw_12h)
+            if len(runners_12h) >= 5:  # need at least 5 distinct coins
                 text = format_12h_recap(runners_12h)
                 if self._tweet(text, "12H RECAP"):
                     state["last_12h_recap"] = now

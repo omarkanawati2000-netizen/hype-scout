@@ -28,6 +28,16 @@ from utils.queue_utils import load_tracked, load_milestones
 
 DIGEST_INTERVAL = 600  # 10 minutes
 
+# Tier buckets — a coin can appear in the digest once per tier it crosses
+DIGEST_TIERS = [2.0, 5.0, 10.0, 25.0, 100.0]
+
+def tier_bucket(mult: float) -> float:
+    """Return the highest tier threshold this multiplier qualifies for."""
+    for t in reversed(DIGEST_TIERS):
+        if mult >= t:
+            return t
+    return 2.0
+
 
 def load_state() -> dict:
     if DIGEST_STATE.exists():
@@ -81,30 +91,32 @@ def main():
     milestones = load_milestones()
 
     # Build best-multiplier map from milestones
-    best_mult: dict = {}  # mint → {mult, entry_mc, peak_mc, name, telegram_msg_id}
+    # Key: mint → best hit this cycle that hasn't been digested at its tier yet
+    best_mult: dict = {}
     for m in milestones:
         mint = m.get("mint", "")
-        if mint in seen_keys:
-            continue
         mult = m.get("multiplier", 0)
         if mult < 2.0:
             continue
+        tier = tier_bucket(mult)
+        tier_key = f"{mint}:{tier}"
+        if tier_key in seen_keys:
+            continue  # already announced this tier for this coin
         existing = best_mult.get(mint)
         if not existing or mult > existing["mult"]:
             tg_mid = coins.get(mint, {}).get("telegram_msg_id") or m.get("telegram_msg_id")
             best_mult[mint] = {
                 "mint":            mint,
                 "mult":            mult,
+                "tier":            tier,
                 "entry_mc":        m.get("entry_mc", 0),
                 "peak_mc":         m.get("current_mc", 0),
                 "name":            m.get("name", coins.get(mint, {}).get("name", "?")),
                 "telegram_msg_id": tg_mid,
             }
 
-    # Also check tracked coins live multiplier (in case no milestone recorded)
+    # Also check tracked coins live multiplier (in case no milestone recorded yet)
     for mint, c in coins.items():
-        if mint in seen_keys:
-            continue
         entry_mc   = c.get("entry_mc", 0)
         current_mc = c.get("current_mc", 0)
         if entry_mc <= 0 or current_mc <= 0:
@@ -112,11 +124,16 @@ def main():
         mult = round(current_mc / entry_mc, 1)
         if mult < 2.0:
             continue
+        tier = tier_bucket(mult)
+        tier_key = f"{mint}:{tier}"
+        if tier_key in seen_keys:
+            continue
         existing = best_mult.get(mint)
         if not existing or mult > existing["mult"]:
             best_mult[mint] = {
                 "mint":            mint,
                 "mult":            mult,
+                "tier":            tier,
                 "entry_mc":        entry_mc,
                 "peak_mc":         current_mc,
                 "name":            c.get("name", "?"),
@@ -133,9 +150,10 @@ def main():
     now_str = datetime.now().strftime("%H:%M")
     msg = build_digest_msg(hits, now_str)
 
-    # Update state
+    # Update state — store tier-based keys so coins can reappear at higher tiers
+    new_tier_keys = {f"{h['mint']}:{h['tier']}" for h in hits}
     state["last_digest"] = now
-    state["seen_keys"]   = list(seen_keys | set(best_mult.keys()))
+    state["seen_keys"]   = list(seen_keys | new_tier_keys)
     save_state(state)
 
     # Post to Discord + Telegram

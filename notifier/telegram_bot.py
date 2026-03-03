@@ -628,15 +628,20 @@ async def run_bot():
             sub_lines.append(f"  {i}. {display} · {joined}")
         sub_block = "\n".join(sub_lines) if sub_lines else "  No subscribers yet"
 
-        # ── Section: Win Rate ─────────────────────────────────────────────────
-        coins = load_tracked(max_age_hours=24)
+        # ── Section: Win Rate (24h, aligned universe) ────────────────────────
+        coins = load_tracked(max_age_hours=24)  # {mint: entry}
         total_tracked = len(coins)
         winners = 0
         try:
             from config import LIVE_SCAN_STATE
             if LIVE_SCAN_STATE.exists():
                 scan_state = _json.loads(LIVE_SCAN_STATE.read_text(encoding="utf-8"))
-                winners = sum(1 for alerts in scan_state.get("alerts", {}).values() if alerts)
+                alerts_map = scan_state.get("alerts", {}) or {}
+                # Count winners only within the same 24h tracked cohort
+                winners = sum(
+                    1 for mint in coins.keys()
+                    if (alerts_map.get(mint, {}) or {}).get("peak_mult", 0) >= 2.0
+                )
         except Exception:
             pass
         win_rate = f"{(winners / total_tracked * 100):.1f}%" if total_tracked > 0 else "N/A"
@@ -648,8 +653,21 @@ async def run_bot():
             from config import QUEUE_FILE
             if QUEUE_FILE.exists():
                 lines = [l for l in QUEUE_FILE.read_text(encoding="utf-8").splitlines() if l.strip()]
-                total_posted  = sum(1 for l in lines if _json.loads(l).get("posted", False))
-                queue_pending = sum(1 for l in lines if not _json.loads(l).get("posted", True))
+                now = datetime.now()
+                today_start = datetime(now.year, now.month, now.day).timestamp()
+
+                for l in lines:
+                    try:
+                        e = _json.loads(l)
+                    except Exception:
+                        continue
+
+                    if e.get("posted", False):
+                        posted_at = e.get("posted_at", 0) or 0
+                        if posted_at >= today_start:
+                            total_posted += 1
+                    else:
+                        queue_pending += 1
         except Exception:
             pass
 
@@ -658,8 +676,15 @@ async def run_bot():
         def check_lock(lock_path):
             try:
                 pid = int(lock_path.read_text().strip())
-                _os.kill(pid, 0)
-                return f"✅ alive (PID {pid})"
+                # os.kill(pid, 0) doesn't work on Windows — use psutil or tasklist
+                import subprocess as _sp
+                result = _sp.run(
+                    ["tasklist", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"],
+                    capture_output=True, text=True
+                )
+                if str(pid) in result.stdout:
+                    return f"✅ alive (PID {pid})"
+                return "❌ down"
             except Exception:
                 return "❌ down"
 
